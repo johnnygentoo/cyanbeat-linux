@@ -41,7 +41,11 @@ GstEngine::GstEngine(QObject *parent) : QObject(parent)
         }
     }
 
-    buildFilters();
+    if (GstElementFactory *f = gst_element_factory_find("pitch")) {
+        m_pitchAvailable = true;
+        gst_object_unref(f);
+    }
+    buildFilters(false);
     g_signal_connect(m_pipeline, "about-to-finish", G_CALLBACK(+[](GstElement *pipeline, gpointer self) {
         static_cast<GstEngine *>(self)->onAboutToFinish(pipeline);
     }), this);
@@ -53,7 +57,7 @@ GstEngine::GstEngine(QObject *parent) : QObject(parent)
     setVolume(m_volume);
 }
 
-void GstEngine::buildFilters()
+void GstEngine::buildFilters(bool withPitch)
 {
     // volume(ReplayGain) ! equalizer-nbands ! speed ! scaletempo ! freeverb !
     // equalizer-nbands(bass) ! rglimiter, with audioconverts between, and a buffer
@@ -67,7 +71,11 @@ void GstEngine::buildFilters()
     // Pitch is SoundTouch's `pitch` (gst-plugins-soundtouch): it shifts pitch without
     // touching timestamps. (The old `speed` element rewrites them, which broke
     // gapless — the next song looked late and was dropped — and the position readout.)
-    GstElement *pitch = make("pitch"), *tempo = make("scaletempo"), *verb = make("freeverb");
+    // SoundTouch also mangles the timeline across a gapless switch (song 3 started
+    // late, position ran past the end, EOS never came), so it's only in the chain
+    // while pitch ≠ 1 — setEffects() rebuilds the chain when that flips.
+    GstElement *pitch = withPitch ? make("pitch") : nullptr;
+    GstElement *tempo = make("scaletempo"), *verb = make("freeverb");
     if (!rg || !eq || !lim || !bass) {
         for (GstElement *x : {rg, eq, lim, bass, pitch, tempo, verb})
             if (x)
@@ -137,6 +145,7 @@ void GstEngine::buildFilters()
     m_rgVolume = rg;
     m_bass = bass;
     m_pitch = pitch;
+    m_filterHasPitch = pitch != nullptr;
     m_tempo = tempo;
     m_reverb = verb;
 }
@@ -203,6 +212,9 @@ void GstEngine::setPcmTap(PcmTap tap)
 void GstEngine::setEqualizer(const QVector<double> &freqsHz, const QVector<double> &bandwidthsHz,
                              const QVector<double> &gainsDb)
 {
+    m_eqFreqs = freqsHz;
+    m_eqBandwidths = bandwidthsHz;
+    m_eqGains = gainsDb;
     if (!m_eq)
         return;
     const int n = int(qMin(freqsHz.size(), qMin(bandwidthsHz.size(), gainsDb.size())));
@@ -245,28 +257,58 @@ void GstEngine::setEffects(const Effects &fx)
     m_fx.speed = qBound(0.5, fx.speed, 2.0);
     m_fx.pitch = qBound(0.5, fx.pitch, 2.0);
     m_fx.reverb = qBound(0.0, fx.reverb, 1.0);
-    // Tempo = the playback rate, time-stretched by scaletempo (pitch kept); pitch =
-    // SoundTouch on top. Classic vaporwave (0.8 / 0.8) = rate 0.8 + pitch 0.8.
-    if (!m_pitch)
+    if (!m_pitchAvailable)
         m_fx.pitch = 1.0;
     if (!m_tempo)
         m_fx.speed = 1.0;
+    const bool needPitch = m_pitchAvailable && std::abs(m_fx.pitch - 1.0) > 1e-3;
+    if (needPitch != m_filterHasPitch)
+        rebuildFilters(needPitch);  // also applies m_fx
+    else
+        applyEffects(true);
+}
+
+void GstEngine::applyEffects(bool reseekForRate)
+{
+    // Tempo = the playback rate, time-stretched by scaletempo (pitch kept); pitch =
+    // SoundTouch on top. Classic vaporwave (0.8 / 0.8) = rate 0.8 + pitch 0.8.
     if (m_pitch)
         g_object_set(m_pitch, "pitch", float(m_fx.pitch), nullptr);
     if (m_reverb)
         g_object_set(m_reverb, "level", float(m_fx.reverb * 0.55), "room-size", float(0.35 + 0.6 * m_fx.reverb),
                      nullptr);
-    if (GObject *b = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(m_bass), 0)) {
-        g_object_set(b, "gain", qBound(0.0, m_fx.bassDb, 12.0), nullptr);
-        g_object_unref(b);
-    }
+    if (m_bass)
+        if (GObject *b = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(m_bass), 0)) {
+            g_object_set(b, "gain", qBound(0.0, m_fx.bassDb, 12.0), nullptr);
+            g_object_unref(b);
+        }
     updateLimiter();
     const double rate = m_fx.speed;
     if (!qFuzzyCompare(rate, m_rate)) {
         m_rate = rate;
         // (GST_SEEK_FLAG_INSTANT_RATE_CHANGE reported success but applied late here.)
-        if (m_state != State::Stopped)
+        if (reseekForRate && m_state != State::Stopped)
             seek(positionMs());
+    }
+}
+
+void GstEngine::rebuildFilters(bool withPitch)
+{
+    // playbin only takes a new audio-filter while it isn't running: stop, swap,
+    // restore every setting, start again and seek back to where we were.
+    const State was = m_state;
+    const qint64 pos = positionMs();
+    gst_element_set_state(m_pipeline, GST_STATE_READY);
+    m_gaplessPending = false;
+    buildFilters(withPitch);
+    if (!m_eqFreqs.isEmpty())
+        setEqualizer(m_eqFreqs, m_eqBandwidths, m_eqGains);
+    setReplayGainDb(m_rgDb);
+    applyEffects(false);
+    if (was != State::Stopped) {
+        m_pendingSeekMs = pos;
+        m_state = State::Paused;  // so the PLAYING report is passed on
+        gst_element_set_state(m_pipeline, was == State::Playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
     }
 }
 
@@ -297,8 +339,8 @@ void GstEngine::onAboutToFinish(GstElement *pipeline)
         uri = m_nextUri;
         m_nextUri.clear();
     }
-    if (uri.isEmpty())
-        return;  // end of the queue: let EOS happen
+    if (uri.isEmpty() || m_filterHasPitch)
+        return;  // end of the queue (or pitch shifting on: plain EOS → next song)
     m_gaplessPending = true;
     g_object_set(pipeline, "uri", uri.constData(), nullptr);
 }
@@ -367,9 +409,16 @@ void GstEngine::handleMessage(GstMessage *msg)
         break;
     case GST_MESSAGE_DURATION_CHANGED:
     case GST_MESSAGE_ASYNC_DONE:
-        if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_ASYNC_DONE && !qFuzzyCompare(m_rate, 1.0) && m_rateStale) {
-            m_rateStale = false;
-            seek(positionMs());  // a freshly loaded song plays at rate 1 until told otherwise
+        if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_ASYNC_DONE) {
+            if (m_pendingSeekMs >= 0) {  // back to where we were after a chain rebuild
+                const qint64 to = m_pendingSeekMs;
+                m_pendingSeekMs = -1;
+                m_rateStale = false;
+                seek(to);
+            } else if (!qFuzzyCompare(m_rate, 1.0) && m_rateStale) {
+                m_rateStale = false;
+                seek(positionMs());  // a freshly loaded song plays at rate 1 until told otherwise
+            }
         }
         Q_EMIT durationChanged(durationMs());
         break;
@@ -393,6 +442,7 @@ void GstEngine::playFile(const QString &path)
     gst_element_set_state(m_pipeline, GST_STATE_READY);
     m_gaplessPending = false;
     m_rateStale = true;
+    m_pendingSeekMs = -1;
     const QByteArray uri = QUrl::fromLocalFile(path).toEncoded();
     g_object_set(m_pipeline, "uri", uri.constData(), nullptr);
     // Ensures a following PAUSED report isn't swallowed as "still stopped".

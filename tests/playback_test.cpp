@@ -109,8 +109,22 @@ int main(int argc, char **argv)
         *hz = samples && rate ? crossings / 2.0 / (double(samples) / rate) : 0;
     };
 
-    // ---- gapless
     int changes = 0, eos = 0;
+    // ---- a single song still ends
+    {
+        int ends = 0;
+        auto c = QObject::connect(player.engine(), &GstEngine::endOfStream, [&] { ++ends; });
+        QElapsedTimer t;
+        t.start();
+        player.playQueue({idx("a")}, 0);
+        while (t.elapsed() < 5000 && !ends)
+            pump(20);
+        QObject::disconnect(c);
+        std::fprintf(stderr, "  single song: EOS after %lld ms\n", (long long)t.elapsed());
+        CHECK(ends == 1 && t.elapsed() < 2600, "a single 2 s song ends on time");
+        player.stop();
+    }
+    // ---- gapless
     QVector<int> order;
     QElapsedTimer since;
     since.start();
@@ -126,7 +140,8 @@ int main(int argc, char **argv)
     player.playQueue({idx("a"), idx("b"), idx("c")}, 0);
     while (clock.elapsed() < 9000 && eos == 0)
         pump(20);
-    std::fprintf(stderr, "  queue ran %lld ms, %d track changes, %d EOS\n", (long long)clock.elapsed(), changes, eos);
+    std::fprintf(stderr, "  queue ran %lld ms, %d track changes, %d EOS, final pos %lld / %lld\n", (long long)clock.elapsed(),
+                 changes, eos, (long long)player.positionMs(), (long long)player.durationMs());
     CHECK(order.mid(0, 3) == QVector<int>({idx("a"), idx("b"), idx("c")}), "gapless: a → b → c in order");
     CHECK(eos == 1, "only one end-of-stream, at the end of the queue");
     CHECK(clock.elapsed() < 6800, "three 2 s songs took about 6 s (no restart gaps)");
@@ -178,6 +193,23 @@ int main(int argc, char **argv)
             run(0.8, 0.8, &gain, &freq);
             std::fprintf(stderr, "  tape 0.8: position x%.2f, %.0f Hz\n", gain, freq);
             CHECK(std::abs(gain - 0.8) < 0.1 && std::abs(freq - 352) < 15, "tape 0.8: 0.8x and 352 Hz");
+            // Turning pitch on mid-song rebuilds the chain; playback must carry on from the same spot.
+            player.playQueue({idx("long")}, 0);
+            pump(1500);
+            const qint64 before = player.positionMs();
+            GstEngine::Effects up;
+            up.pitch = 1.2;
+            player.engine()->setEffects(up);
+            pump(700);
+            const qint64 after = player.positionMs();
+            std::fprintf(stderr, "  pitch on mid-song: %lld ms → %lld ms\n", (long long)before, (long long)after);
+            CHECK(after > before && after - before < 1200 && player.state() == GstEngine::State::Playing,
+                  "switching pitch on mid-song resumes where it was");
+            player.engine()->setEffects({});
+            pump(400);
+            CHECK(player.state() == GstEngine::State::Playing && player.positionMs() >= after,
+                  "switching it off again resumes too");
+            player.stop();
             run(1.0, 1.25, &gain, &freq);
             std::fprintf(stderr, "  pitch 1.25 only: position x%.2f, %.0f Hz\n", gain, freq);
             CHECK(std::abs(gain - 1.0) < 0.1 && std::abs(freq - 550) < 20, "pitch 1.25 alone: 550 Hz at normal speed");

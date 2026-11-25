@@ -63,7 +63,7 @@ public:
         double speed = 1.0, pitch = 1.0, reverb = 0.0, bassDb = 0.0;
     };
     bool hasSpeed() const { return m_tempo != nullptr; }   // scaletempo
-    bool hasPitch() const { return m_pitch != nullptr; }   // gst-plugins-soundtouch
+    bool hasPitch() const { return m_pitchAvailable; }     // gst-plugins-soundtouch
     bool hasReverb() const { return m_reverb != nullptr; } // freeverb
     void setEffects(const Effects &fx);
 
@@ -90,7 +90,9 @@ private:
     void handleMessage(GstMessage *msg);
     void setState(State s);
 
-    void buildFilters();
+    void buildFilters(bool withPitch);
+    void rebuildFilters(bool withPitch);
+    void applyEffects(bool reseekForRate);
     void updateLimiter();
     void onAboutToFinish(GstElement *pipeline);
     static int onTapProbe(GstPad *pad, GstPadProbeInfo *info, void *self);
@@ -104,6 +106,10 @@ private:
     GstElement *m_tempo = nullptr;
     GstElement *m_reverb = nullptr;
     bool m_limitEq = false;
+    bool m_pitchAvailable = false;
+    std::atomic_bool m_filterHasPitch{false};
+    QVector<double> m_eqFreqs, m_eqBandwidths, m_eqGains;
+    qint64 m_pendingSeekMs = -1;
     double m_rgDb = 0.0;
     Effects m_fx;
     double m_rate = 1.0;
