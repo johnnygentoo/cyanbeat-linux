@@ -78,9 +78,19 @@ SourceList::SourceList(QWidget *parent) : QTreeWidget(parent)
     expandAll();
     setCurrentItem(m_music);
 
-    connect(this, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *cur) {
-        if (m_rebuilding || !cur || cur->data(0, KindRole).toInt() == HeaderKind)
+    connect(this, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *cur, QTreeWidgetItem *prev) {
+        if (m_rebuilding || !cur)
             return;
+        const int kind = cur->data(0, KindRole).toInt();
+        if (kind != Source::Library && kind != Source::Smart && kind != Source::Playlist) {
+            // A header or a phone isn't something the track list can show: clicking a
+            // phone still makes it "current", which used to blank the list. Snap back.
+            QTreeWidgetItem *back = prev && isSourceItem(prev) ? prev : m_music;
+            m_rebuilding = true;
+            setCurrentItem(back);
+            m_rebuilding = false;
+            return;
+        }
         Q_EMIT sourceChanged(sourceOf(cur));
     });
     // Phones aren't a view of the library: clicking one opens Sync.
@@ -95,6 +105,12 @@ SourceList::SourceList(QWidget *parent) : QTreeWidget(parent)
         if (!name.isEmpty())
             Q_EMIT renameRequested(item->data(0, IdRole).toLongLong(), name);
     });
+}
+
+bool SourceList::isSourceItem(const QTreeWidgetItem *item)
+{
+    const int kind = item ? item->data(0, KindRole).toInt() : -1;
+    return kind == Source::Library || kind == Source::Smart || kind == Source::Playlist;
 }
 
 Source SourceList::sourceOf(const QTreeWidgetItem *item)

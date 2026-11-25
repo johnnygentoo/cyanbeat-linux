@@ -53,6 +53,7 @@ protected:
 private:
     QTreeWidgetItem *itemFor(const Source &s) const;
     static Source sourceOf(const QTreeWidgetItem *item);
+    static bool isSourceItem(const QTreeWidgetItem *item);
     QTreeWidgetItem *m_music = nullptr;
     QTreeWidgetItem *m_playlistsHeader = nullptr;
     QTreeWidgetItem *m_devicesHeader = nullptr;

@@ -490,8 +490,11 @@ QWidget *MainWindow::buildStatusStrip()
 
 // ---------------------------------------------------------------- filtering
 
-void MainWindow::onSourceChanged(const Source &s)
+void MainWindow::onSourceChanged(const Source &requested)
 {
+    Source s = requested;
+    if (s.kind != Source::Library && s.kind != Source::Smart && s.kind != Source::Playlist)
+        s = Source{};  // never show an empty list for something that isn't a source
     const bool wasLibrary = m_source.kind == Source::Library;
     m_source = s;
     QHeaderView *hh = m_table->horizontalHeader();
