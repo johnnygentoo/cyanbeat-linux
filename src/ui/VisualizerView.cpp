@@ -12,7 +12,7 @@ namespace {
 QColor colorAt(const QVector<QColor> &stops, double t)
 {
     if (stops.isEmpty())
-        return Theme::Cyan;
+        return Theme::accent();
     if (stops.size() == 1)
         return stops.first();
     t = qBound(0.0, t, 1.0) * (stops.size() - 1);
@@ -59,7 +59,8 @@ void VisualizerView::paintEvent(QPaintEvent *)
     const double maxH = floorY - 70.0;
     const double slot = (width() - 2 * margin) / n;
     const double barW = qMax(2.0, slot * 0.72);
-    const QVector<QColor> &stops = m_vis->colors();
+    // Vaporwave reskins this too: magenta rising into cyan.
+    const QVector<QColor> stops = Theme::vapor() ? QVector<QColor>{Theme::Magenta, Theme::Cyan} : m_vis->colors();
 
     for (int i = 0; i < n; ++i) {
         const double h = qMax(2.0, double(bars[i]) * maxH);
@@ -85,10 +86,10 @@ void VisualizerView::paintEvent(QPaintEvent *)
     title.setPointSizeF(title.pointSizeF() * 1.6);
     title.setBold(true);
     p.setFont(title);
-    p.setPen(Theme::Cyan);
+    p.setPen(Theme::accent());
     p.drawText(QRectF(margin, 16, width() - 2 * margin, 30), Qt::AlignLeft | Qt::AlignVCenter,
                QFontMetrics(title).elidedText(m_title, Qt::ElideRight, int(width() - 2 * margin)));
-    QColor dim = Theme::Cyan;
+    QColor dim = Theme::accent();
     dim.setAlpha(170);
     p.setFont(font());
     p.setPen(dim);

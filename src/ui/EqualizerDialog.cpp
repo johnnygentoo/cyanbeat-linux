@@ -38,7 +38,7 @@ protected:
         QPainterPath frame;
         frame.addRoundedRect(r, 6, 6);
         p.fillPath(frame, Theme::DarkAnchor);
-        QColor rim = Theme::Cyan;
+        QColor rim = Theme::accent();
         rim.setAlpha(90);
         p.setPen(QPen(rim, 1));
         p.drawPath(frame);
@@ -50,9 +50,9 @@ protected:
         QFont small = font();
         small.setPointSizeF(small.pointSizeF() * 0.8);
         p.setFont(small);
-        QColor grid = Theme::Cyan;
+        QColor grid = Theme::accent();
         grid.setAlpha(35);
-        QColor text = Theme::Cyan;
+        QColor text = Theme::accent();
         text.setAlpha(140);
         for (int db : {-12, -6, 0, 6, 12}) {
             p.setPen(QPen(db == 0 ? rim : grid, 1));
@@ -85,14 +85,14 @@ protected:
         // Cyan lows into violet highs, see-through so the grid shows under it.
         const bool on = m_eq->enabled();
         QLinearGradient across(plot.left(), 0, plot.right(), 0);
-        QColor c0 = Theme::Cyan, c1 = Theme::Violet;
+        QColor c0 = Theme::accent(), c1 = Theme::accent2();
         c0.setAlpha(on ? 95 : 30);
         c1.setAlpha(on ? 95 : 30);
         across.setColorAt(0.0, c0);
         across.setColorAt(1.0, c1);
         p.fillPath(fill, across);
         QLinearGradient stroke(plot.left(), 0, plot.right(), 0);
-        QColor s0 = Theme::Cyan, s1 = Theme::Violet;
+        QColor s0 = Theme::accent(), s1 = Theme::accent2();
         s0.setAlpha(on ? 255 : 110);
         s1.setAlpha(on ? 255 : 110);
         stroke.setColorAt(0.0, s0);
@@ -157,7 +157,7 @@ EqualizerDialog::EqualizerDialog(Equalizer *eq, QWidget *parent) : QDialog(paren
     v->addLayout(grid);
 
     auto *note = new QLabel(tr("Boosts are real boosts; a limiter keeps them from clipping."), this);
-    note->setStyleSheet(QStringLiteral("color: rgba(21,244,238,0.6);"));
+    note->setObjectName(QStringLiteral("Hint"));
     v->addWidget(note);
 
     connect(m_on, &QCheckBox::toggled, this, [this](bool on) {

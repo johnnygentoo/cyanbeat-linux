@@ -211,3 +211,35 @@ QSlider::handle:vertical:hover { background: #ffffff; }
 QPushButton:disabled { color: rgba(21, 244, 238, 0.35); border-color: rgba(21, 244, 238, 0.25); }
 QRadioButton::indicator { border-radius: 7px; }
 QTreeView::indicator:indeterminate { background: rgba(21, 244, 238, 0.45); border-color: #15F4EE; }
+#PaneHeader {
+    background: #091018;
+    border-bottom: 1px solid rgba(21, 244, 238, 0.45);
+    border-right: 1px solid rgba(21, 244, 238, 0.25);
+    padding: 3px;
+}
+#Hint { color: rgba(21, 244, 238, 0.6); }
+
+/* ---- vaporwave switch (effects window) + top-bar toggle --------------------- */
+QPushButton#VaporSwitch {
+    font-size: 15px; font-weight: bold;
+    background: #091018;
+    border: 2px solid rgba(160, 107, 255, 0.8);
+    color: #A06BFF;
+    border-radius: 8px;
+}
+QPushButton#VaporSwitch:checked {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #15F4EE, stop:1 #A06BFF);
+    color: #000000;
+}
+QToolButton#VaporButton {
+    background-color: #091018;
+    border: 1px solid rgba(160, 107, 255, 0.7);
+    border-radius: 12px;
+    color: #A06BFF;
+    font-weight: bold;
+    padding: 2px 10px;
+}
+QToolButton#VaporButton:checked {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #15F4EE, stop:1 #A06BFF);
+    color: #000000;
+}

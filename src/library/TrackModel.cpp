@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "library/TrackModel.h"
 
+#include "ui/Theme.h"
+
 #include <QDataStream>
 #include <QDateTime>
 #include <QFont>
@@ -116,7 +118,7 @@ QVariant TrackModel::data(const QModelIndex &index, int role) const
         return pos;
     case Qt::DecorationRole:
         if (index.column() == ColPlaying && isPlaying)
-            return m_speaker;
+            return Theme::icon(QStringLiteral("speaker"));
         return {};
     case Qt::FontRole:
         if (isPlaying) {

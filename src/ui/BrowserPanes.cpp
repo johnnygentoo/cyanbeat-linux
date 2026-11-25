@@ -42,9 +42,7 @@ BrowserPanes::BrowserPanes(QWidget *parent) : QWidget(parent)
         // Styled like a table header so the panes read as one column browser.
         auto *label = new QLabel(tr(kTitles[level]), col);
         label->setAlignment(Qt::AlignCenter);
-        label->setStyleSheet(QStringLiteral(
-            "background:#091018; border-bottom:1px solid rgba(21,244,238,0.45);"
-            "border-right:1px solid rgba(21,244,238,0.25); padding:3px;"));
+        label->setObjectName(QStringLiteral("PaneHeader"));
         v->addWidget(label);
 
         auto *list = new QListWidget(col);

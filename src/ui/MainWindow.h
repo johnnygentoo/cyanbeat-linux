@@ -14,6 +14,9 @@ class DuplicatesDialog;
 class Devices;
 class SyncDialog;
 class Equalizer;
+class EffectsDialog;
+class QSystemTrayIcon;
+class Vapor;
 class EqualizerDialog;
 class QStackedWidget;
 class Visualizer;
@@ -36,6 +39,9 @@ class MainWindow : public QMainWindow {
 public:
     MainWindow(Library *library, Player *player, QWidget *parent = nullptr);
     ~MainWindow() override;
+
+    // Really quit (File › Quit, tray, MPRIS) — closing the window may only hide it to the tray.
+    void quitApp();
 
     // Testing hook: once the first scan lands, save a screenshot and quit.
     void setSnapshotPath(const QString &path) { m_snapshotPath = path; }
@@ -68,6 +74,8 @@ private:
     void maybeSnapshot();
     void showDuplicates();
     void showEqualizer();
+    void showEffects();
+    void setupTray();
     void showSync(const QString &phoneId = QString());
     void setVisualizerShown(bool on);
 
@@ -104,6 +112,12 @@ private:
     QTimer *m_searchDebounce = nullptr;
     QPointer<DuplicatesDialog> m_dupes;
     QPointer<EqualizerDialog> m_eqDialog;
+    QPointer<EffectsDialog> m_fxDialog;
+    Vapor *m_vapor = nullptr;
+    QToolButton *m_vaporBtn = nullptr;
+    QSystemTrayIcon *m_tray = nullptr;
+    QAction *m_closeToTray = nullptr;
+    bool m_quitting = false;
     QPointer<SyncDialog> m_syncDialog;
     Devices *m_devices = nullptr;
     Equalizer *m_eq = nullptr;

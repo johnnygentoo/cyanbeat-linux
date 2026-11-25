@@ -90,13 +90,13 @@ void LcdDisplay::paintEvent(QPaintEvent *)
     QPainterPath shape;
     shape.addRoundedRect(body, 8, 8);
     p.fillPath(shape, bg);
-    QColor rim = Theme::Cyan;
+    QColor rim = Theme::accent();
     rim.setAlpha(110);
     p.setPen(QPen(rim, 1.0));
     p.drawPath(shape);
 
     QFont base = font();
-    QColor dim = Theme::Cyan;
+    QColor dim = Theme::accent();
     dim.setAlpha(190);
 
     if (!m_hasTrack) {
@@ -116,11 +116,11 @@ void LcdDisplay::paintEvent(QPaintEvent *)
         const double cy = height() / 2.0;
         for (double hf : heights) {
             const double bh = h * hf;
-            p.fillRect(QRectF(x, cy - bh / 2, barW, bh), Theme::Cyan);
+            p.fillRect(QRectF(x, cy - bh / 2, barW, bh), Theme::accent());
             x += barW + gap;
         }
         p.setFont(f);
-        p.setPen(m_status.isEmpty() ? Theme::Cyan : dim);
+        p.setPen(m_status.isEmpty() ? Theme::accent() : dim);
         p.drawText(QRectF(x + 8, 0, textW + 4, height()), Qt::AlignVCenter | Qt::AlignLeft, name);
         return;
     }
@@ -129,7 +129,7 @@ void LcdDisplay::paintEvent(QPaintEvent *)
     if (!m_bars.isEmpty()) {
         p.save();
         p.setClipPath(shape);
-        QColor bar = Theme::Cyan;
+        QColor bar = Theme::accent();
         bar.setAlpha(38);
         const double area = width() - 2 * kPad;
         const double slot = area / m_bars.size();
@@ -148,7 +148,7 @@ void LcdDisplay::paintEvent(QPaintEvent *)
     QFont titleFont = base;
     titleFont.setBold(true);
     p.setFont(titleFont);
-    p.setPen(Theme::Cyan);
+    p.setPen(Theme::accent());
     const QFontMetricsF tfm(titleFont);
     p.drawText(QRectF(kPad, 5, textW, tfm.height()), Qt::AlignHCenter | Qt::AlignTop,
                tfm.elidedText(m_title, Qt::ElideRight, textW));
@@ -179,7 +179,7 @@ void LcdDisplay::paintEvent(QPaintEvent *)
     QPainterPath track;
     track.addRoundedRect(bar, 3, 3);
     p.fillPath(track, QColor(0x14, 0x24, 0x30));
-    QColor edge = Theme::Cyan;
+    QColor edge = Theme::accent();
     edge.setAlpha(120);
     p.setPen(QPen(edge, 1.0));
     p.drawPath(track);
@@ -189,7 +189,7 @@ void LcdDisplay::paintEvent(QPaintEvent *)
         fill.setWidth(bar.width() * f);
         QPainterPath fp;
         fp.addRoundedRect(fill, 3, 3);
-        p.fillPath(fp, Theme::Cyan);
+        p.fillPath(fp, Theme::accent());
         // Diamond playhead.
         const QPointF c(bar.left() + bar.width() * f, bar.center().y());
         QPainterPath diamond;
@@ -199,7 +199,7 @@ void LcdDisplay::paintEvent(QPaintEvent *)
         diamond.lineTo(c.x() - 6, c.y());
         diamond.closeSubpath();
         p.setPen(QPen(Theme::DarkAnchor, 1.0));
-        p.setBrush(Theme::Cyan);
+        p.setBrush(Theme::accent());
         p.drawPath(diamond);
     }
 }

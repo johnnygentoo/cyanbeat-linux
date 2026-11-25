@@ -2,6 +2,7 @@
 // Regression: clicking a phone under DEVICES made it the sidebar's current item,
 // which reached the track list as a bogus source and blanked it until restart.
 #include "ui/SourceList.h"
+#include "ui/Theme.h"
 
 #include <QApplication>
 #include <QTreeWidgetItemIterator>
@@ -49,6 +50,15 @@ int main(int argc, char **argv)
     list.setPhones({});
     list.setPhones({{QStringLiteral("R5CY"), QStringLiteral("SM-S936U · Wi-Fi"), true}});
     CHECK(list.current().kind == Source::Playlist, "phone refresh keeps the current view");
+
+    // Regression: reskinning re-sets item icons, which used to fire a bogus playlist
+    // "rename", rebuild the list under the loop, and crash.
+    int renames = 0;
+    QObject::connect(&list, &SourceList::renameRequested, [&] { ++renames; });
+    Theme::setVapor(true);
+    Theme::setVapor(false);
+    CHECK(renames == 0, "reskin doesn't rename (or crash) playlists");
+    CHECK(list.current().kind == Source::Playlist, "reskin keeps the current view");
 
     std::fprintf(stderr, failures ? "%d FAILED\n" : "all passed\n", failures);
     return failures ? 1 : 0;

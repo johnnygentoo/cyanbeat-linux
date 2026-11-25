@@ -107,11 +107,12 @@ int main(int argc, char **argv)
         window.raise();
         window.activateWindow();
     };
-    mpris.onQuit = [&window] { window.close(); };
+    mpris.onQuit = [&window] { window.quitApp(); };
     if (!snapshot && !mpris.registerOnBus())
         qWarning("CyanBeat: could not register %s on the session bus", qPrintable(Mpris::ServiceName));
 #endif
 
+    QApplication::setQuitOnLastWindowClosed(false);  // the tray keeps it alive; quitApp() ends it
     window.show();
     library.start();
     return app.exec();

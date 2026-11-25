@@ -41,7 +41,8 @@ void saveKnown(const QVector<Devices::Phone> &phones)
 
 Devices::Devices(QObject *parent) : QObject(parent), m_poll(new QTimer(this))
 {
-    m_adb = Adb::available();
+    // CYANBEAT_NO_ADB=1 keeps test/snapshot runs off any connected phone.
+    m_adb = Adb::available() && !qEnvironmentVariableIsSet("CYANBEAT_NO_ADB");
     m_phones = loadKnown();
     connect(&m_watcher, &QFutureWatcher<Snapshot>::finished, this, [this] {
         const Snapshot s = m_watcher.result();

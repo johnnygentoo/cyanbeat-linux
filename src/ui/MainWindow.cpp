@@ -7,6 +7,8 @@
 #include "ui/DuplicatesDialog.h"
 #include "ui/EqualizerDialog.h"
 #include "ui/SyncDialog.h"
+#include "ui/EffectsDialog.h"
+#include "engine/Vapor.h"
 #include "sync/Devices.h"
 #include "ui/VisualizerView.h"
 #include "engine/Equalizer.h"
@@ -34,6 +36,7 @@
 #include <QSlider>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
+#include <QSystemTrayIcon>
 #include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTableView>
@@ -49,14 +52,14 @@ namespace {
 
 QIcon icon(const char *name)
 {
-    return QIcon(QStringLiteral(":/icons/%1.svg").arg(QLatin1String(name)));
+    return Theme::icon(QLatin1String(name));
 }
 
 QToolButton *transportButton(const char *iconName, const QString &tip, int iconPx, const char *objName, QWidget *parent)
 {
     auto *b = new QToolButton(parent);
     b->setObjectName(QLatin1String(objName));
-    b->setIcon(icon(iconName));
+    Theme::bindIcon(b, QLatin1String(iconName));
     b->setIconSize(QSize(iconPx, iconPx));
     b->setToolTip(tip);
     b->setFocusPolicy(Qt::NoFocus);
@@ -70,12 +73,14 @@ MainWindow::MainWindow(Library *library, Player *player, QWidget *parent)
     : QMainWindow(parent), m_library(library), m_player(player)
 {
     setWindowTitle(QStringLiteral("CyanBeat"));
-    setWindowIcon(icon("cyanbeat"));
+    setWindowIcon(QIcon(QStringLiteral(":/icons/cyanbeat.svg")));
     resize(1280, 800);
 
     m_eq = new Equalizer(m_player->engine(), this);
     m_vis = new Visualizer(m_player, this);
     m_devices = new Devices(this);
+    m_vapor = new Vapor(m_player->engine(), this);
+    connect(m_vapor, &Vapor::enabledChanged, this, [](bool on) { Theme::setVapor(on); });
 
     m_model = new TrackModel(this);
     m_proxy = new QSortFilterProxyModel(this);
@@ -177,7 +182,20 @@ MainWindow::MainWindow(Library *library, Player *player, QWidget *parent)
     connect(m_searchDebounce, &QTimer::timeout, this, &MainWindow::refilter);
     connect(m_search, &QLineEdit::textChanged, m_searchDebounce, qOverload<>(&QTimer::start));
 
+    connect(m_vaporBtn, &QToolButton::toggled, m_vapor, &Vapor::setEnabled);
+    connect(m_vaporBtn, &QWidget::customContextMenuRequested, this, &MainWindow::showEffects);
+    connect(m_vapor, &Vapor::enabledChanged, m_vaporBtn, [this](bool on) {
+        const QSignalBlocker b(m_vaporBtn);
+        m_vaporBtn->setChecked(on);
+    });
+    setupTray();
+
     loadSettings();
+    connect(Theme::notifier(), &Theme::Notifier::changed, this, [this] {
+        onPlayerState(m_player->state());  // play/pause + repeat icons depend on state, not just theme
+        onRepeatChanged(m_player->repeat());
+        m_model->refreshTrack(m_player->currentIndex());
+    });
 
     if (!m_player->engine()->isValid())
         QTimer::singleShot(0, this, [this] {
@@ -216,7 +234,7 @@ void MainWindow::buildMenus()
     file->addAction(tr("New Playlist from &Selection"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N), this,
                     [this] { newPlaylist(selectedTracks()); });
     file->addSeparator();
-    file->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
+    file->addAction(tr("&Quit"), QKeySequence::Quit, this, &MainWindow::quitApp);
 
     QMenu *controls = menuBar()->addMenu(tr("&Controls"));
     controls->addAction(tr("Play / Pause"), QKeySequence(Qt::Key_Space), m_player, &Player::togglePlay);
@@ -229,6 +247,24 @@ void MainWindow::buildMenus()
     controls->addAction(tr("Volume Down"), QKeySequence(Qt::CTRL | Qt::Key_Down), this,
                         [this] { m_volume->setValue(m_volume->value() - 5); });
     controls->addSeparator();
+    QMenu *leveling = controls->addMenu(tr("Volume Leveling (ReplayGain)"));
+    auto *rgGroup = new QActionGroup(leveling);
+    const int rgSaved = QSettings().value(QStringLiteral("playback/replayGain"), 0).toInt();
+    const QStringList rgNames{tr("Off"), tr("By song (track gain)"), tr("By album (album gain)")};
+    for (int m = 0; m < 3; ++m) {
+        QAction *a = leveling->addAction(rgNames[m]);
+        a->setCheckable(true);
+        a->setChecked(m == rgSaved);
+        rgGroup->addAction(a);
+        connect(a, &QAction::triggered, this, [this, m] {
+            m_player->setReplayGain(ReplayGain::Mode(m));
+            QSettings().setValue(QStringLiteral("playback/replayGain"), m);
+        });
+    }
+    m_player->setReplayGain(ReplayGain::Mode(qBound(0, rgSaved, 2)));
+    leveling->addSeparator();
+    leveling->addAction(tr("Uses ReplayGain tags in the files; untagged songs play as they are."))->setEnabled(false);
+    controls->addSeparator();
     m_shuffleAction = controls->addAction(tr("Shuffle"));
     m_shuffleAction->setCheckable(true);
     connect(m_shuffleAction, &QAction::toggled, m_player, &Player::setShuffle);
@@ -236,6 +272,12 @@ void MainWindow::buildMenus()
 
     QMenu *windowMenu = menuBar()->addMenu(tr("&Window"));
     windowMenu->addAction(tr("&Equalizer"), QKeySequence(Qt::CTRL | Qt::Key_E), this, &MainWindow::showEqualizer);
+    windowMenu->addAction(tr("Effects && &Vaporwave"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V), this,
+                          &MainWindow::showEffects);
+    m_closeToTray = windowMenu->addAction(tr("Keep Playing in the Tray When Closed"));
+    m_closeToTray->setCheckable(true);
+    m_closeToTray->setChecked(QSettings().value(QStringLiteral("window/closeToTray"), true).toBool());
+    connect(m_closeToTray, &QAction::toggled, this, [](bool on) { QSettings().setValue(QStringLiteral("window/closeToTray"), on); });
 
     QMenu *tools = menuBar()->addMenu(tr("&Tools"));
     tools->addAction(tr("Find &Duplicates…"), this, &MainWindow::showDuplicates);
@@ -303,9 +345,9 @@ QWidget *MainWindow::buildTopBar()
     h->addSpacing(14);
 
     auto *volLow = new QLabel(bar);
-    volLow->setPixmap(icon("vol_low").pixmap(14, 14));
+    Theme::bindIcon(volLow, QStringLiteral("vol_low"), 14);
     auto *volHigh = new QLabel(bar);
-    volHigh->setPixmap(icon("vol_high").pixmap(16, 16));
+    Theme::bindIcon(volHigh, QStringLiteral("vol_high"), 16);
     m_volume = new QSlider(Qt::Horizontal, bar);
     m_volume->setRange(0, 100);
     m_volume->setFixedWidth(110);
@@ -315,7 +357,16 @@ QWidget *MainWindow::buildTopBar()
     h->addWidget(volLow);
     h->addWidget(m_volume);
     h->addWidget(volHigh);
-    h->addSpacing(18);
+    h->addSpacing(12);
+    m_vaporBtn = new QToolButton(bar);
+    m_vaporBtn->setObjectName(QStringLiteral("VaporButton"));
+    m_vaporBtn->setText(QStringLiteral("≈"));
+    m_vaporBtn->setCheckable(true);
+    m_vaporBtn->setFocusPolicy(Qt::NoFocus);
+    m_vaporBtn->setToolTip(tr("Vaporwave — right-click for the knobs (Ctrl+Shift+V)"));
+    m_vaporBtn->setContextMenuPolicy(Qt::CustomContextMenu);
+    h->addWidget(m_vaporBtn, 0, Qt::AlignVCenter);
+    h->addSpacing(12);
 
     m_lcd = new LcdDisplay(bar);
     h->addWidget(m_lcd, 1);
@@ -324,7 +375,7 @@ QWidget *MainWindow::buildTopBar()
     m_search = new QLineEdit(bar);
     m_search->setPlaceholderText(tr("Search"));
     m_search->setClearButtonEnabled(true);
-    m_search->addAction(icon("search"), QLineEdit::LeadingPosition);
+    Theme::bindIcon(m_search->addAction(QIcon(), QLineEdit::LeadingPosition), QStringLiteral("search"));
     m_search->setFixedWidth(220);
     h->addWidget(m_search, 0, Qt::AlignVCenter);
     return bar;
@@ -442,7 +493,7 @@ QWidget *MainWindow::buildStatusStrip()
     auto stripButton = [strip](const char *iconName, const QString &tip) {
         auto *b = new QToolButton(strip);
         b->setObjectName(QStringLiteral("StripButton"));
-        b->setIcon(icon(iconName));
+        Theme::bindIcon(b, QLatin1String(iconName));
         b->setIconSize(QSize(16, 16));
         b->setToolTip(tip);
         b->setFocusPolicy(Qt::NoFocus);
@@ -787,6 +838,84 @@ void MainWindow::showEqualizer()
     m_eqDialog->activateWindow();
 }
 
+void MainWindow::showEffects()
+{
+    if (!m_fxDialog) {
+        m_fxDialog = new EffectsDialog(m_vapor, m_player->engine(), this);
+        m_fxDialog->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    m_fxDialog->show();
+    m_fxDialog->raise();
+    m_fxDialog->activateWindow();
+}
+
+void MainWindow::setupTray()
+{
+    if (!QSystemTrayIcon::isSystemTrayAvailable())
+        return;
+    m_tray = new QSystemTrayIcon(QIcon(QStringLiteral(":/icons/cyanbeat.svg")), this);
+    m_tray->setToolTip(QStringLiteral("CyanBeat"));
+    auto *menu = new QMenu(this);
+    QAction *now = menu->addAction(QString());
+    now->setEnabled(false);
+    menu->addSeparator();
+    menu->addAction(tr("Play / Pause"), m_player, &Player::togglePlay);
+    menu->addAction(tr("Next"), m_player, [this] { m_player->next(); });
+    menu->addAction(tr("Previous"), m_player, &Player::previous);
+    menu->addSeparator();
+    QAction *vapor = menu->addAction(tr("Vaporwave"));
+    vapor->setCheckable(true);
+    connect(vapor, &QAction::toggled, m_vapor, &Vapor::setEnabled);
+    connect(m_vapor, &Vapor::enabledChanged, vapor, [vapor](bool on) {
+        const QSignalBlocker b(vapor);
+        vapor->setChecked(on);
+    });
+    menu->addSeparator();
+    menu->addAction(tr("Show / Hide CyanBeat"), this, [this] {
+        if (isVisible() && !isMinimized()) {
+            hide();
+        } else {
+            show();
+            setWindowState((windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
+            raise();
+            activateWindow();
+        }
+    });
+    menu->addAction(tr("Quit"), this, &MainWindow::quitApp);
+    connect(menu, &QMenu::aboutToShow, this, [this, now] {
+        const Track *t = m_player->currentTrack();
+        now->setText(t ? QStringLiteral("♪ %1").arg(t->title.left(48)) : tr("Nothing playing"));
+    });
+    m_tray->setContextMenu(menu);
+    connect(m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason r) {
+        if (r == QSystemTrayIcon::Trigger) {
+            if (isVisible() && !isMinimized())
+                hide();
+            else {
+                show();
+                raise();
+                activateWindow();
+            }
+        } else if (r == QSystemTrayIcon::MiddleClick) {
+            m_player->togglePlay();
+        }
+    });
+    connect(m_player, &Player::currentChanged, this, [this] {
+        const Track *t = m_player->currentTrack();
+        m_tray->setToolTip(t ? QStringLiteral("CyanBeat — %1%2").arg(t->title, t->artist.isEmpty() ? QString()
+                                                                                                  : QStringLiteral(" · ") + t->artist)
+                             : QStringLiteral("CyanBeat"));
+    });
+    m_tray->show();
+}
+
+void MainWindow::quitApp()
+{
+    m_quitting = true;
+    close();
+    QApplication::quit();
+}
+
 void MainWindow::setVisualizerShown(bool on)
 {
     m_stack->setCurrentWidget(on ? static_cast<QWidget *>(m_visView) : m_contentSplit);
@@ -869,6 +998,15 @@ void MainWindow::maybeSnapshot()
                 QApplication::quit();
             });
             return;
+        }
+        if (qEnvironmentVariableIsSet("CYANBEAT_SNAPSHOT_VAPOR")) {  // classic vaporwave, reskinned, + FX window
+            m_vapor->classic();
+            showEffects();
+            QTimer::singleShot(2400, this, [this, path] {
+                QString fx = path;
+                fx.replace(QStringLiteral(".png"), QStringLiteral("-fx.png"));
+                m_fxDialog->grab().save(fx);
+            });
         }
         if (qEnvironmentVariableIsSet("CYANBEAT_SNAPSHOT_VIS"))  // big visualizer while playing
             m_visAction->setChecked(true);
@@ -1009,6 +1147,18 @@ void MainWindow::saveSettings() const
 void MainWindow::closeEvent(QCloseEvent *e)
 {
     saveSettings();
+    if (!m_quitting && m_tray && m_tray->isVisible() && m_closeToTray && m_closeToTray->isChecked()) {
+        // Keep playing; the tray (and waybar) still control it.
+        hide();
+        e->ignore();
+        if (!QSettings().value(QStringLiteral("window/trayHintShown"), false).toBool()) {
+            QSettings().setValue(QStringLiteral("window/trayHintShown"), true);
+            m_tray->showMessage(QStringLiteral("CyanBeat"),
+                                tr("Still playing in the tray. Quit from the tray menu or File › Quit."));
+        }
+        return;
+    }
     m_player->stop();
     QMainWindow::closeEvent(e);
+    QApplication::quit();  // not hiding to the tray: closing the window ends the app
 }

@@ -63,9 +63,9 @@ void RatingDelegate::paint(QPainter *p, const QStyleOptionViewItem &opt, const Q
     for (int i = 0; i < 5; ++i) {
         const QPointF c(opt.rect.left() + kLeft + i * (kStar + kGap) + kStar / 2.0, cy);
         if (i < rating) {
-            p->fillPath(starPath(c, kStar / 2.0), Theme::Cyan);
+            p->fillPath(starPath(c, kStar / 2.0), Theme::accent());
         } else if (hot) {
-            QColor dot = Theme::Cyan;
+            QColor dot = Theme::accent();
             dot.setAlpha(110);
             p->setPen(Qt::NoPen);
             p->setBrush(dot);

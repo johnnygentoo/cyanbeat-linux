@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "ui/Theme.h"
 #include "ui/SourceList.h"
 
 #include "library/TrackModel.h"
@@ -7,6 +8,7 @@
 #include <QDragEnterEvent>
 #include <QMenu>
 #include <QMimeData>
+#include <QTreeWidgetItemIterator>
 
 namespace {
 constexpr int KindRole = Qt::UserRole + 1;
@@ -16,9 +18,17 @@ constexpr int HeaderKind = 99;
 constexpr int PhoneKind = 98;
 constexpr int PhoneIdRole = Qt::UserRole + 4;
 
+constexpr int IconRole = Qt::UserRole + 5;
+
 QIcon icon(const char *name)
 {
-    return QIcon(QStringLiteral(":/icons/%1.svg").arg(QLatin1String(name)));
+    return Theme::icon(QLatin1String(name));
+}
+
+void setItemIcon(QTreeWidgetItem *item, const char *name)
+{
+    item->setIcon(0, icon(name));
+    item->setData(0, IconRole, QString::fromLatin1(name));
 }
 
 QTreeWidgetItem *sectionHeader(QTreeWidget *tree, const QString &text)
@@ -30,7 +40,7 @@ QTreeWidgetItem *sectionHeader(QTreeWidget *tree, const QString &text)
     f.setBold(true);
     f.setPointSizeF(f.pointSizeF() * 0.85);
     item->setFont(0, f);
-    item->setForeground(0, QColor(21, 244, 238, 150));
+    item->setForeground(0, Theme::accent(150));
     return item;
 }
 }
@@ -60,7 +70,7 @@ SourceList::SourceList(QWidget *parent) : QTreeWidget(parent)
 
     auto *lib = sectionHeader(this, tr("LIBRARY"));
     m_music = new QTreeWidgetItem(lib, {tr("Music")});
-    m_music->setIcon(0, icon("music"));
+    setItemIcon(m_music, "music");
     m_music->setData(0, KindRole, Source::Library);
 
     m_devicesHeader = sectionHeader(this, tr("DEVICES"));
@@ -69,7 +79,7 @@ SourceList::SourceList(QWidget *parent) : QTreeWidget(parent)
     m_playlistsHeader = sectionHeader(this, tr("PLAYLISTS"));
     for (int s = 0; s < Source::SmartCount; ++s) {
         auto *item = new QTreeWidgetItem(m_playlistsHeader, {smartName(s)});
-        item->setIcon(0, icon("smart"));
+        setItemIcon(item, "smart");
         item->setData(0, KindRole, Source::Smart);
         item->setData(0, SmartRole, s);
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
@@ -77,6 +87,20 @@ SourceList::SourceList(QWidget *parent) : QTreeWidget(parent)
 
     expandAll();
     setCurrentItem(m_music);
+
+    connect(Theme::notifier(), &Theme::Notifier::changed, this, [this] {
+        // setIcon() counts as an edit (itemChanged): without the guard a playlist
+        // item "renamed" itself mid-loop, the list was rebuilt under the iterator → crash.
+        m_rebuilding = true;
+        for (QTreeWidgetItemIterator it(this); *it; ++it) {
+            const QString name = (*it)->data(0, IconRole).toString();
+            if (!name.isEmpty())
+                (*it)->setIcon(0, Theme::icon(name));
+            if ((*it)->data(0, KindRole).toInt() == HeaderKind && (*it)->parent() == nullptr)
+                (*it)->setForeground(0, Theme::accent(150));
+        }
+        m_rebuilding = false;
+    });
 
     connect(this, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *cur, QTreeWidgetItem *prev) {
         if (m_rebuilding || !cur)
@@ -156,7 +180,7 @@ void SourceList::setPlaylists(const QVector<Playlist> &playlists)
     m_playlistItems.clear();
     for (const Playlist &p : playlists) {
         auto *item = new QTreeWidgetItem(m_playlistsHeader, {p.name});
-        item->setIcon(0, icon("playlist"));
+        setItemIcon(item, "playlist");
         item->setData(0, KindRole, Source::Playlist);
         item->setData(0, IdRole, p.id);
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable | Qt::ItemIsDropEnabled);
@@ -175,19 +199,19 @@ void SourceList::setPhones(const QVector<PhoneEntry> &phones)
     qDeleteAll(m_devicesHeader->takeChildren());
     if (phones.isEmpty()) {
         auto *none = new QTreeWidgetItem(m_devicesHeader, {tr("No phone connected")});
-        none->setIcon(0, icon("phone"));
+        setItemIcon(none, "phone");
         none->setFlags(Qt::NoItemFlags);
         none->setData(0, KindRole, HeaderKind);
     }
     for (const PhoneEntry &p : phones) {
         auto *item = new QTreeWidgetItem(m_devicesHeader, {p.label});
-        item->setIcon(0, icon("phone"));
+        setItemIcon(item, "phone");
         item->setData(0, KindRole, PhoneKind);
         item->setData(0, PhoneIdRole, p.id);
         item->setFlags(Qt::ItemIsEnabled);
         item->setToolTip(0, p.connected ? tr("Click to sync") : tr("Not connected — click to reconnect or sync"));
         if (!p.connected)
-            item->setForeground(0, QColor(21, 244, 238, 120));
+            item->setForeground(0, Theme::accent(120));
     }
     m_devicesHeader->setExpanded(true);
     m_rebuilding = false;

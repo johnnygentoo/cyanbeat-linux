@@ -75,11 +75,13 @@ const Track *Player::currentTrack() const
 
 qint64 Player::durationMs() const
 {
-    const qint64 d = m_engine->durationMs();
-    if (d > 0)
-        return d;
+    // The song's own length first: with a speed effect GStreamer reports the
+    // stretched duration (4:53 at 0.8× came back as 6:05) while position stays in
+    // song time.
     const Track *t = currentTrack();
-    return t ? t->durationMs : 0;
+    if (t && t->durationMs > 0)
+        return t->durationMs;
+    return m_engine->durationMs();
 }
 
 bool Player::hasNext() const

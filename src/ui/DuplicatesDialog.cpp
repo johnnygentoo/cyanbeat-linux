@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "ui/Theme.h"
 #include "ui/DuplicatesDialog.h"
 
 #include "engine/Player.h"
@@ -239,7 +240,7 @@ void DuplicatesDialog::populate()
         head->setFirstColumnSpanned(true);
         head->setFont(ColFile, bold);
         head->setFlags(Qt::ItemIsEnabled);
-        head->setForeground(ColFile, QColor(21, 244, 238, certain(g.reasons) ? 255 : 170));
+        head->setForeground(ColFile, Theme::accent(certain(g.reasons) ? 255 : 170));
 
         for (int k = 0; k < g.members.size(); ++k) {
             const Duplicates::Member &m = g.members[k];

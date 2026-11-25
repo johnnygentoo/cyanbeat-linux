@@ -32,6 +32,7 @@ add_library(cyanbeat_core STATIC
   src/engine/Player.cpp
   src/engine/Equalizer.cpp
   src/engine/Visualizer.cpp
+  src/engine/Vapor.cpp
   src/library/Track.cpp
   src/library/Scanner.cpp
   src/library/Collection.cpp
@@ -48,6 +49,7 @@ add_library(cyanbeat_core STATIC
   src/ui/BrowserPanes.cpp
   src/ui/DuplicatesDialog.cpp
   src/ui/EqualizerDialog.cpp
+  src/ui/EffectsDialog.cpp
   src/ui/SyncDialog.cpp
   src/ui/VisualizerView.cpp
   src/ui/RatingDelegate.cpp
