@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "engine/GstEngine.h"
+#include "engine/Player.h"
 #include "ui/SourceList.h"
 
 #include <QMainWindow>
@@ -25,10 +25,8 @@ class TrackModel;
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    explicit MainWindow(Library *library, QWidget *parent = nullptr);
+    MainWindow(Library *library, Player *player, QWidget *parent = nullptr);
     ~MainWindow() override;
-
-    enum class Repeat { Off, All, One };
 
     // Testing hook: once the first scan lands, save a screenshot and quit.
     void setSnapshotPath(const QString &path) { m_snapshotPath = path; }
@@ -60,26 +58,19 @@ private:
     void updateSummary();
     void maybeSnapshot();
 
-    // Playback / queue.
+    // Playback (the queue lives in Player).
     void playFromRow(int proxyRow);
-    void playQueueIndex(int pos);
-    void togglePlay();
-    void stop();
-    void next(bool userInitiated);
-    void previous();
-    void onEndOfStream();
-    void onEngineError(const QString &msg);
-    void onEngineState(GstEngine::State s);
+    void onCurrentChanged(int libraryIndex);
+    void onPlayerState(GstEngine::State s);
+    void onShuffleChanged(bool on);
+    void onRepeatChanged(Player::Repeat r);
     void revealPlaying();
-    void setShuffle(bool on);
-    void cycleRepeat();
-    int currentLibraryIndex() const;
 
     void loadSettings();
     void saveSettings() const;
 
     Library *m_library;
-    GstEngine *m_engine;
+    Player *m_player;
 
     LcdDisplay *m_lcd = nullptr;
     QToolButton *m_playBtn = nullptr;
@@ -97,17 +88,9 @@ private:
     QToolButton *m_repeatBtn = nullptr;
     QAction *m_browserAction = nullptr;
     QAction *m_shuffleAction = nullptr;
-    QTimer *m_tick = nullptr;
     QTimer *m_searchDebounce = nullptr;
 
-    QVector<int> m_queue;     // library indices, in play order
-    int m_queuePos = -1;
-    QString m_currentPath;
-    QStringList m_queuePaths; // queue parked as paths while a rescan swaps indices
-    bool m_shuffle = false;
-    Repeat m_repeat = Repeat::Off;
-    int m_errorStreak = 0;
-    bool m_playCounted = false;
+    QString m_snapshotPath;
 
     Source m_source;
     QVector<int> m_sourceRows;       // library indices for the current source
@@ -115,5 +98,4 @@ private:
     QVector<int> m_basePositions;    // after search: positions into m_sourceRows
     int m_librarySortColumn = 4;     // TrackModel::ColArtist
     Qt::SortOrder m_librarySortOrder = Qt::AscendingOrder;
-    QString m_snapshotPath;
 };

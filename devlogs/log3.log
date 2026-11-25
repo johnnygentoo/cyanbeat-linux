@@ -1,0 +1,61 @@
+================================================================================
+CyanBeat Linux — Dev Log #3
+JohnnyGentoo Studios
+Date: 2026-11-25
+Phase: 2 — Player refactor, MPRIS, cyanbeat-remote, waybar hookup
+Branch: main
+Author: Claude
+================================================================================
+
+PLAYER  (src/engine/Player.*)
+  - Queue, shuffle, repeat, volume, play counting and the rescan re-anchoring moved
+    out of MainWindow into Player. The window, MPRIS and the remote all drive it;
+    the window only mirrors its signals (currentChanged, stateChanged, positionTick,
+    shuffle/repeat/volumeChanged, skipped). "Play" with nothing queued calls a
+    fallback the window provides (selection, else top of the list).
+
+MPRIS  (src/platform/Mpris.*, Qt DBus; CMake option CYANBEAT_MPRIS, on for Linux)
+  - org.mpris.MediaPlayer2.cyanbeat at /org/mpris/MediaPlayer2: root (Raise, Quit,
+    Identity, DesktopEntry) + Player (Play/Pause/PlayPause/Stop/Next/Previous, Seek,
+    SetPosition, OpenUri for library files; PlaybackStatus, LoopStatus, Shuffle,
+    Volume, Position, Metadata, Can*; Seeked).
+  - Metadata: trackid /com/johnnygentoo/CyanBeat/track/<n>, length, url, title,
+    artist, album, albumArtist, genre, track/disc no., year, useCount, userRating.
+  - PropertiesChanged sent by hand on state/track/shuffle/loop/volume and when the
+    current track's rating or play count changes.
+  - Single instance: a second launch calls Raise on the first and exits 0.
+  - --snapshot runs never register on the bus (headless checks don't show up in
+    waybar).
+
+cyanbeat-remote  (src/remote/main.cpp, Qt Core + DBus only, ~1.3 MB)
+  - cmus-remote flags: -p -u(toggle) -s -n/--next -r/--prev -S -R -v VOL -k SEEK -Q,
+    plus --raise. VOL 50 | 50% | +5% | -5%; SEEK 90 | +10 | -10 | 1:30 | +1m.
+  - -Q prints cmus's format (status, file, duration, position, tag …, set shuffle/
+    repeat/repeat_current/vol_left/vol_right) so cmus-reading scripts parse it.
+  - --or-cmus: when CyanBeat isn't on the bus, execvp("cmus-remote", same args).
+  - Not running (without --or-cmus): message + exit 1, like cmus-remote.
+
+WAYBAR (user's ~/.config, backups *.bak-cyanbeat)
+  - config.jsonc: the five custom/cmus_* on-click commands now run
+    ~/.local/bin/cyanbeat-remote --or-cmus <same flag>.
+  - scripts/waybar-media.sh replaced by extras/waybar/media.sh: same 25-column
+    scroller / PAUSED / blank behaviour, reads cyanbeat-remote --or-cmus -Q, and no
+    longer shows " - Title" for songs with no artist (common for yt-dlp rips).
+  - cava unchanged: it listens to PipeWire output and picks CyanBeat up as is.
+  - Installed to ~/.local (bin, applications, icons).
+
+VERIFIED (private bus via dbus-run-session, fakesink, so nothing hit the real bar)
+  - Play from stopped, pause/resume, seek absolute/relative/mm:ss, volume absolute/
+    relative, shuffle/repeat toggles, next, previous, second-instance raise+exit,
+    MPRIS Quit, "not running" exit 1, --or-cmus handing off to cmus-remote.
+  - dbus-monitor: PropertiesChanged for Metadata/CanGoNext on track change,
+    PlaybackStatus Playing/Paused, Seeked with the exact µs.
+  - The new waybar-media.sh: blank with nothing running, scroller while playing,
+    PAUSED when paused.
+  - collection_test + engine_smoke still pass.
+  - NOT verified: real waybar clicks (needs a waybar reload), media keys, KDE Connect.
+
+NEXT
+  - Phase 3: in-app cava visualizer (own cava instance on CyanBeat's PipeWire node,
+    not launched with -p because waybar-cava.sh pkills "cava -p") + 10-band EQ with
+    the Android app's presets.

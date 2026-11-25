@@ -56,8 +56,8 @@ QToolButton *transportButton(const char *iconName, const QString &tip, int iconP
 
 } // namespace
 
-MainWindow::MainWindow(Library *library, QWidget *parent)
-    : QMainWindow(parent), m_library(library), m_engine(new GstEngine(this))
+MainWindow::MainWindow(Library *library, Player *player, QWidget *parent)
+    : QMainWindow(parent), m_library(library), m_player(player)
 {
     setWindowTitle(QStringLiteral("CyanBeat"));
     setWindowIcon(icon("cyanbeat"));
@@ -113,41 +113,38 @@ MainWindow::MainWindow(Library *library, QWidget *parent)
             refilter();
         }
     });
-    connect(m_library, &Library::tracksAboutToChange, this, [this] {
-        m_queuePaths.clear();
-        for (int li : std::as_const(m_queue))
-            m_queuePaths << m_library->tracks()[li].path;
-    });
     connect(m_library, &Library::tracksChanged, this, &MainWindow::onLibraryChanged);
     connect(m_library, &Library::scanStarted, this, [this] {
         m_summary->setText(tr("Scanning library…"));
-        if (m_queuePos < 0)
+        if (m_player->currentIndex() < 0)
             m_lcd->setStatusText(tr("Scanning library…"));
     });
     connect(m_library, &Library::scanFinished, this, [this] {
-        if (m_queuePos < 0)
+        if (m_player->currentIndex() < 0)
             m_lcd->setStatusText(QString());
         updateSummary();
         maybeSnapshot();
     });
-    connect(m_lcd, &LcdDisplay::seekRequested, m_engine, &GstEngine::seek);
-    connect(m_engine, &GstEngine::endOfStream, this, &MainWindow::onEndOfStream);
-    connect(m_engine, &GstEngine::error, this, &MainWindow::onEngineError);
-    connect(m_engine, &GstEngine::stateChanged, this, &MainWindow::onEngineState);
 
-    m_tick = new QTimer(this);
-    m_tick->setInterval(250);
-    connect(m_tick, &QTimer::timeout, this, [this] {
-        const qint64 pos = m_engine->positionMs(), dur = m_engine->durationMs();
-        m_lcd->setPosition(pos, dur);
-        // A play counts once it's heard half the song or four minutes, whichever comes first.
-        if (!m_playCounted && currentLibraryIndex() >= 0 && m_engine->state() == GstEngine::State::Playing) {
-            const qint64 threshold = dur > 0 ? qMin<qint64>(dur / 2, 240'000) : 30'000;
-            if (pos >= threshold) {
-                m_playCounted = true;
-                m_library->recordPlay(currentLibraryIndex());
-            }
-        }
+    // Player → UI. MPRIS and cyanbeat-remote drive the same Player, so the
+    // window just mirrors whatever it reports.
+    connect(m_lcd, &LcdDisplay::seekRequested, m_player, &Player::seek);
+    connect(m_player, &Player::positionTick, m_lcd, &LcdDisplay::setPosition);
+    connect(m_player, &Player::currentChanged, this, &MainWindow::onCurrentChanged);
+    connect(m_player, &Player::stateChanged, this, &MainWindow::onPlayerState);
+    connect(m_player, &Player::shuffleChanged, this, &MainWindow::onShuffleChanged);
+    connect(m_player, &Player::repeatChanged, this, &MainWindow::onRepeatChanged);
+    connect(m_player, &Player::volumeChanged, this, [this](double v) {
+        const QSignalBlocker b(m_volume);
+        m_volume->setValue(qRound(v * 100));
+    });
+    connect(m_player, &Player::skipped, this, [this](const QString &file, const QString &err) {
+        m_summary->setText(tr("Skipped \"%1\": %2").arg(file, err));
+    });
+    m_player->setStartFallback([this] {
+        // Nothing queued yet: start from the selection, else the top of the list.
+        const QModelIndexList sel = m_table->selectionModel()->selectedRows();
+        playFromRow(sel.isEmpty() ? 0 : sel.first().row());
     });
 
     m_searchDebounce = new QTimer(this);
@@ -158,10 +155,10 @@ MainWindow::MainWindow(Library *library, QWidget *parent)
 
     loadSettings();
 
-    if (!m_engine->isValid())
+    if (!m_player->engine()->isValid())
         QTimer::singleShot(0, this, [this] {
             QMessageBox::critical(this, tr("CyanBeat"),
-                                  tr("Audio playback is unavailable:\n%1").arg(m_engine->initError()));
+                                  tr("Audio playback is unavailable:\n%1").arg(m_player->engine()->initError()));
         });
 
     refilter();
@@ -198,10 +195,10 @@ void MainWindow::buildMenus()
     file->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
 
     QMenu *controls = menuBar()->addMenu(tr("&Controls"));
-    controls->addAction(tr("Play / Pause"), QKeySequence(Qt::Key_Space), this, &MainWindow::togglePlay);
-    controls->addAction(tr("Stop"), QKeySequence(Qt::CTRL | Qt::Key_Period), this, &MainWindow::stop);
-    controls->addAction(tr("Next Song"), QKeySequence(Qt::CTRL | Qt::Key_Right), this, [this] { next(true); });
-    controls->addAction(tr("Previous Song"), QKeySequence(Qt::CTRL | Qt::Key_Left), this, &MainWindow::previous);
+    controls->addAction(tr("Play / Pause"), QKeySequence(Qt::Key_Space), m_player, &Player::togglePlay);
+    controls->addAction(tr("Stop"), QKeySequence(Qt::CTRL | Qt::Key_Period), m_player, &Player::stop);
+    controls->addAction(tr("Next Song"), QKeySequence(Qt::CTRL | Qt::Key_Right), m_player, [this] { m_player->next(); });
+    controls->addAction(tr("Previous Song"), QKeySequence(Qt::CTRL | Qt::Key_Left), m_player, &Player::previous);
     controls->addSeparator();
     controls->addAction(tr("Volume Up"), QKeySequence(Qt::CTRL | Qt::Key_Up), this,
                         [this] { m_volume->setValue(m_volume->value() + 5); });
@@ -210,8 +207,8 @@ void MainWindow::buildMenus()
     controls->addSeparator();
     m_shuffleAction = controls->addAction(tr("Shuffle"));
     m_shuffleAction->setCheckable(true);
-    connect(m_shuffleAction, &QAction::toggled, this, &MainWindow::setShuffle);
-    controls->addAction(tr("Cycle Repeat (Off / All / One)"), this, &MainWindow::cycleRepeat);
+    connect(m_shuffleAction, &QAction::toggled, m_player, &Player::setShuffle);
+    controls->addAction(tr("Cycle Repeat (Off / All / One)"), m_player, &Player::cycleRepeat);
 
     QMenu *view = menuBar()->addMenu(tr("&View"));
     m_browserAction = view->addAction(tr("Show Column &Browser"));
@@ -242,9 +239,9 @@ QWidget *MainWindow::buildTopBar()
     auto *prev = transportButton("prev", tr("Previous"), 18, "Transport", bar);
     m_playBtn = transportButton("play", tr("Play"), 24, "PlayButton", bar);
     auto *nextBtn = transportButton("next", tr("Next"), 18, "Transport", bar);
-    connect(prev, &QToolButton::clicked, this, &MainWindow::previous);
-    connect(m_playBtn, &QToolButton::clicked, this, &MainWindow::togglePlay);
-    connect(nextBtn, &QToolButton::clicked, this, [this] { next(true); });
+    connect(prev, &QToolButton::clicked, m_player, &Player::previous);
+    connect(m_playBtn, &QToolButton::clicked, m_player, &Player::togglePlay);
+    connect(nextBtn, &QToolButton::clicked, m_player, [this] { m_player->next(); });
     h->addWidget(prev, 0, Qt::AlignVCenter);
     h->addWidget(m_playBtn, 0, Qt::AlignVCenter);
     h->addWidget(nextBtn, 0, Qt::AlignVCenter);
@@ -259,7 +256,7 @@ QWidget *MainWindow::buildTopBar()
     m_volume->setFixedWidth(110);
     m_volume->setFocusPolicy(Qt::NoFocus);
     m_volume->setToolTip(tr("Volume"));
-    connect(m_volume, &QSlider::valueChanged, this, [this](int v) { m_engine->setVolume(v / 100.0); });
+    connect(m_volume, &QSlider::valueChanged, this, [this](int v) { m_player->setVolume(v / 100.0); });
     h->addWidget(volLow);
     h->addWidget(m_volume);
     h->addWidget(volHigh);
@@ -392,10 +389,10 @@ QWidget *MainWindow::buildStatusStrip()
     });
     m_shuffleBtn = stripButton("shuffle", tr("Shuffle"));
     m_shuffleBtn->setCheckable(true);
-    connect(m_shuffleBtn, &QToolButton::toggled, m_shuffleAction, &QAction::setChecked);
+    connect(m_shuffleBtn, &QToolButton::toggled, m_player, &Player::setShuffle);
     m_repeatBtn = stripButton("repeat", tr("Repeat: off"));
     m_repeatBtn->setCheckable(true);
-    connect(m_repeatBtn, &QToolButton::clicked, this, &MainWindow::cycleRepeat);
+    connect(m_repeatBtn, &QToolButton::clicked, m_player, &Player::cycleRepeat);
 
     h->addWidget(add);
     h->addSpacing(6);
@@ -515,7 +512,7 @@ void MainWindow::onBrowserFiltered()
     }
     const bool withPositions = m_source.kind != Source::Library;
     m_model->setSource(&m_library->tracks(), std::move(rows), withPositions ? positions : QVector<int>());
-    m_model->setPlaying(currentLibraryIndex(), m_engine->state() == GstEngine::State::Paused);
+    m_model->setPlaying(m_player->currentIndex(), m_player->state() == GstEngine::State::Paused);
     updateReorderable();
     updateSummary();
 }
@@ -690,30 +687,10 @@ void MainWindow::updateSummary()
 
 void MainWindow::onLibraryChanged()
 {
-    // Indices moved; re-anchor the queue by path.
-    const TrackList &tracks = m_library->tracks();
-    QHash<QString, int> byPath;
-    byPath.reserve(tracks.size());
-    for (int i = 0; i < tracks.size(); ++i)
-        byPath.insert(tracks[i].path, i);
-
-    m_queue.clear();
-    m_queuePos = -1;
-    for (const QString &p : std::as_const(m_queuePaths)) {
-        const auto it = byPath.constFind(p);
-        if (it == byPath.cend())
-            continue;
-        if (p == m_currentPath)
-            m_queuePos = int(m_queue.size());
-        m_queue << *it;
-    }
-    m_queuePaths.clear();
-
-    if (m_queuePos < 0)
+    if (m_player->currentIndex() < 0)
         m_lcd->setStatusText(QString());
     loadSourceRows();
     refilter();
-
 }
 
 void MainWindow::maybeSnapshot()
@@ -746,136 +723,42 @@ void MainWindow::maybeSnapshot()
 
 // ---------------------------------------------------------------- playback
 
-int MainWindow::currentLibraryIndex() const
-{
-    return (m_queuePos >= 0 && m_queuePos < m_queue.size()) ? m_queue[m_queuePos] : -1;
-}
-
 void MainWindow::playFromRow(int proxyRow)
 {
     const int rows = m_proxy->rowCount();
     if (proxyRow < 0 || proxyRow >= rows)
         return;
-    m_queue.clear();
-    m_queue.reserve(rows);
+    QVector<int> queue;
+    queue.reserve(rows);
     for (int r = 0; r < rows; ++r)
-        m_queue << m_proxy->index(r, 0).data(TrackModel::IndexRole).toInt();
-    int pos = proxyRow;
-    if (m_shuffle) {
-        const int chosen = m_queue[proxyRow];
-        m_queue.removeAt(proxyRow);
-        std::shuffle(m_queue.begin(), m_queue.end(), *QRandomGenerator::global());
-        m_queue.prepend(chosen);
-        pos = 0;
-    }
-    m_errorStreak = 0;
-    playQueueIndex(pos);
+        queue << m_proxy->index(r, 0).data(TrackModel::IndexRole).toInt();
+    m_player->playQueue(std::move(queue), proxyRow);
 }
 
-void MainWindow::playQueueIndex(int pos)
+void MainWindow::onCurrentChanged(int li)
 {
-    if (pos < 0 || pos >= m_queue.size())
-        return;
-    m_queuePos = pos;
-    m_playCounted = false;
-    const Track &t = m_library->tracks()[m_queue[pos]];
-    m_currentPath = t.path;
-    m_lcd->setTrack(t.title, t.artist, t.album);
-    m_lcd->setPosition(0, t.durationMs);
-    m_engine->playFile(t.path);
-    m_model->setPlaying(m_queue[pos], false);
-    setWindowTitle(QStringLiteral("%1 — CyanBeat").arg(t.title));
-    m_tick->start();
-}
-
-void MainWindow::togglePlay()
-{
-    if (m_engine->state() != GstEngine::State::Stopped) {
-        m_engine->togglePause();
-        return;
+    if (li < 0) {
+        m_lcd->clearTrack();
+        setWindowTitle(QStringLiteral("CyanBeat"));
+    } else {
+        const Track &t = m_library->tracks()[li];
+        m_lcd->setTrack(t.title, t.artist, t.album);
+        setWindowTitle(QStringLiteral("%1 — CyanBeat").arg(t.title));
     }
-    if (currentLibraryIndex() >= 0) {
-        playQueueIndex(m_queuePos);
-        return;
-    }
-    // Nothing queued yet: start from the selection, else the top of the list.
-    const QModelIndexList sel = m_table->selectionModel()->selectedRows();
-    playFromRow(sel.isEmpty() ? 0 : sel.first().row());
+    m_model->setPlaying(li, m_player->state() == GstEngine::State::Paused);
 }
 
-void MainWindow::stop()
-{
-    m_engine->stop();
-    m_tick->stop();
-    m_lcd->setPosition(0, m_engine->durationMs());
-}
-
-void MainWindow::next(bool userInitiated)
-{
-    if (m_queue.isEmpty())
-        return;
-    if (!userInitiated && m_repeat == Repeat::One) {
-        playQueueIndex(m_queuePos);
-        return;
-    }
-    int pos = m_queuePos + 1;
-    if (pos >= m_queue.size()) {
-        if (m_repeat == Repeat::Off && !userInitiated) {
-            stop();
-            m_queuePos = 0;
-            return;
-        }
-        if (m_shuffle)
-            std::shuffle(m_queue.begin(), m_queue.end(), *QRandomGenerator::global());
-        pos = 0;
-    }
-    playQueueIndex(pos);
-}
-
-void MainWindow::previous()
-{
-    if (m_queue.isEmpty())
-        return;
-    if (m_engine->positionMs() > 3000 || m_queuePos == 0) {
-        m_engine->seek(0);
-        return;
-    }
-    playQueueIndex(m_queuePos - 1);
-}
-
-void MainWindow::onEndOfStream()
-{
-    m_errorStreak = 0;
-    if (!m_playCounted && currentLibraryIndex() >= 0) {  // short song that finished between ticks
-        m_playCounted = true;
-        m_library->recordPlay(currentLibraryIndex());
-    }
-    next(false);
-}
-
-void MainWindow::onEngineError(const QString &msg)
-{
-    const QString name = m_currentPath.section(QLatin1Char('/'), -1);
-    m_summary->setText(tr("Skipped \"%1\": %2").arg(name, msg));
-    // Auto-skip unplayable files, but don't spin through a whole broken library.
-    if (++m_errorStreak <= 5)
-        QTimer::singleShot(150, this, [this] { next(false); });
-}
-
-void MainWindow::onEngineState(GstEngine::State s)
+void MainWindow::onPlayerState(GstEngine::State s)
 {
     const bool playing = s == GstEngine::State::Playing;
     m_playBtn->setIcon(icon(playing ? "pause" : "play"));
     m_playBtn->setToolTip(playing ? tr("Pause") : tr("Play"));
-    m_model->setPlaying(s == GstEngine::State::Stopped && m_queuePos < 0 ? -1 : currentLibraryIndex(),
-                        s == GstEngine::State::Paused);
-    if (playing)
-        m_tick->start();
+    m_model->setPlaying(m_player->currentIndex(), s == GstEngine::State::Paused);
 }
 
 void MainWindow::revealPlaying()
 {
-    const int li = currentLibraryIndex();
+    const int li = m_player->currentIndex();
     if (li < 0)
         return;
     int row = m_model->rows().indexOf(li);
@@ -895,24 +778,19 @@ void MainWindow::revealPlaying()
     m_table->selectionModel()->select(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
 }
 
-void MainWindow::setShuffle(bool on)
+void MainWindow::onShuffleChanged(bool on)
 {
-    m_shuffle = on;
     const QSignalBlocker b1(m_shuffleBtn), b2(m_shuffleAction);
     m_shuffleBtn->setChecked(on);
     m_shuffleAction->setChecked(on);
-    // Reorder what's left of the queue so the switch takes effect immediately.
-    if (m_queuePos >= 0 && m_queuePos + 1 < m_queue.size() && on)
-        std::shuffle(m_queue.begin() + m_queuePos + 1, m_queue.end(), *QRandomGenerator::global());
 }
 
-void MainWindow::cycleRepeat()
+void MainWindow::onRepeatChanged(Player::Repeat r)
 {
-    m_repeat = m_repeat == Repeat::Off ? Repeat::All : m_repeat == Repeat::All ? Repeat::One : Repeat::Off;
-    m_repeatBtn->setChecked(m_repeat != Repeat::Off);
-    m_repeatBtn->setIcon(icon(m_repeat == Repeat::One ? "repeat_one" : "repeat"));
-    m_repeatBtn->setToolTip(m_repeat == Repeat::Off ? tr("Repeat: off")
-                            : m_repeat == Repeat::All ? tr("Repeat: all") : tr("Repeat: one"));
+    m_repeatBtn->setChecked(r != Player::Repeat::Off);
+    m_repeatBtn->setIcon(icon(r == Player::Repeat::One ? "repeat_one" : "repeat"));
+    m_repeatBtn->setToolTip(r == Player::Repeat::Off ? tr("Repeat: off")
+                            : r == Player::Repeat::All ? tr("Repeat: all") : tr("Repeat: one"));
 }
 
 // ---------------------------------------------------------------- settings
@@ -930,11 +808,11 @@ void MainWindow::loadSettings()
     m_table->horizontalHeader()->setSectionHidden(TrackModel::ColPos, true);
     m_browserAction->setChecked(s.value(QStringLiteral("window/browser"), true).toBool());
     m_volume->setValue(s.value(QStringLiteral("playback/volume"), 80).toInt());
-    m_engine->setVolume(m_volume->value() / 100.0);
-    setShuffle(s.value(QStringLiteral("playback/shuffle"), false).toBool());
-    const int rep = s.value(QStringLiteral("playback/repeat"), 0).toInt();
-    for (int i = 0; i < rep % 3; ++i)
-        cycleRepeat();
+    m_player->setVolume(m_volume->value() / 100.0);
+    m_player->setShuffle(s.value(QStringLiteral("playback/shuffle"), false).toBool());
+    m_player->setRepeat(Player::Repeat(qBound(0, s.value(QStringLiteral("playback/repeat"), 0).toInt(), 2)));
+    onShuffleChanged(m_player->shuffle());
+    onRepeatChanged(m_player->repeat());
 }
 
 void MainWindow::saveSettings() const
@@ -948,13 +826,13 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("window/librarySortColumn"), m_librarySortColumn);
     s.setValue(QStringLiteral("window/librarySortOrder"), int(m_librarySortOrder));
     s.setValue(QStringLiteral("playback/volume"), m_volume->value());
-    s.setValue(QStringLiteral("playback/shuffle"), m_shuffle);
-    s.setValue(QStringLiteral("playback/repeat"), int(m_repeat));
+    s.setValue(QStringLiteral("playback/shuffle"), m_player->shuffle());
+    s.setValue(QStringLiteral("playback/repeat"), int(m_player->repeat()));
 }
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
     saveSettings();
-    m_engine->stop();
+    m_player->stop();
     QMainWindow::closeEvent(e);
 }

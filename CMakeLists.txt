@@ -12,6 +12,16 @@ endif()
 include(GNUInstallDirs)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Concurrent Svg Sql)
+# MPRIS + cyanbeat-remote need D-Bus (Linux/BSD desktops); a Windows build skips them.
+if(UNIX AND NOT APPLE)
+  set(_mpris_default ON)
+else()
+  set(_mpris_default OFF)
+endif()
+option(CYANBEAT_MPRIS "MPRIS D-Bus interface and the cyanbeat-remote tool" ${_mpris_default})
+if(CYANBEAT_MPRIS)
+  find_package(Qt6 REQUIRED COMPONENTS DBus)
+endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0 gstreamer-audio-1.0)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
@@ -19,6 +29,7 @@ pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 # Everything except main.cpp lives in a static lib so tests can link it.
 add_library(cyanbeat_core STATIC
   src/engine/GstEngine.cpp
+  src/engine/Player.cpp
   src/library/Track.cpp
   src/library/Scanner.cpp
   src/library/Collection.cpp
@@ -32,6 +43,14 @@ add_library(cyanbeat_core STATIC
   src/ui/MainWindow.cpp
 )
 target_include_directories(cyanbeat_core PUBLIC src)
+if(CYANBEAT_MPRIS)
+  target_sources(cyanbeat_core PRIVATE src/platform/Mpris.cpp)
+  target_link_libraries(cyanbeat_core PUBLIC Qt6::DBus)
+  target_compile_definitions(cyanbeat_core PUBLIC CYANBEAT_HAVE_MPRIS)
+  qt_add_executable(cyanbeat-remote src/remote/main.cpp)
+  target_link_libraries(cyanbeat-remote PRIVATE Qt6::Core Qt6::DBus)
+  install(TARGETS cyanbeat-remote RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 # GLib/GStreamer headers use the identifiers `signals`/`slots`; keep Qt's keywords out of the way.
 target_compile_definitions(cyanbeat_core PUBLIC QT_NO_KEYWORDS
   CYANBEAT_VERSION="${PROJECT_VERSION}")

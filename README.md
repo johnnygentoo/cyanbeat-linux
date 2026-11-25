@@ -4,8 +4,8 @@ A local music player in the JohnnyCyan look: a library, a column browser and a
 now-playing display, in the spirit of mid-2000s desktop jukeboxes, kept light.
 Desktop sibling of the CyanBeat Android app, from JohnnyGentoo Studios.
 
-Planned: two-way phone sync over ADB (USB or wireless) or MTP, waybar / MPRIS
-control, and a cava visualizer.
+Planned: two-way phone sync over ADB (USB or wireless) or MTP, and a cava
+visualizer.
 
 ## Status
 
@@ -22,6 +22,10 @@ Early (v0.1.0). Working now:
   Date Added (when the file landed on disk), Last Played. Right-click the column
   header to show/hide columns.
 - Drag songs out of the list into a file manager.
+- MPRIS (`org.mpris.MediaPlayer2.cyanbeat`): media keys, `playerctl`, waybar's
+  `mpris` module and KDE Connect see it. Launching it again raises the open window.
+- `cyanbeat-remote`: cmus-remote's flags and `-Q` output, plus `--or-cmus` to fall
+  back to cmus when CyanBeat isn't running. See `extras/waybar/`.
 - Genre / Artist / Album column browser, search, sortable track list.
 - GStreamer playback: mp3, flac, ogg/opus, m4a/aac, wav, wma, webm/mka. Never opens
   a video window. Unplayable files are skipped.
@@ -33,7 +37,7 @@ Early (v0.1.0). Working now:
 
 1. ~~Skeleton, theme, playback, library, browser~~
 2. ~~SQLite collection: playlists, play counts, ratings, smart lists~~
-3. MPRIS + `cyanbeat-remote` (cmus-remote-compatible flags) for waybar
+3. ~~MPRIS + `cyanbeat-remote` (cmus-remote-compatible flags) for waybar~~
 4. Visualizer (cava) and a 10-band EQ with the Android app's presets
 5. Phone sync over ADB: flagged folders, merged both ways (new files on either side
    are copied to the other; nothing is deleted except in mirror mode, which asks first)
@@ -41,7 +45,7 @@ Early (v0.1.0). Working now:
 
 ## Build
 
-Needs Qt 6.5+ (Widgets, Concurrent, Svg), GStreamer 1.x with base/good plugins
+Needs Qt 6.5+ (Widgets, Concurrent, Svg, Sql with the SQLite driver, DBus), GStreamer 1.x with base/good plugins
 (and libav or ugly for wma/aac), TagLib 2, CMake 3.21+.
 
 ```sh
@@ -52,7 +56,19 @@ cmake --build build
 
 Tests: `CYANBEAT_TEST_FILE=/path/to/song.mp3 ctest --test-dir build`
 
-Install: `cmake --install build --prefix ~/.local`
+Install: `cmake --install build --prefix ~/.local` (installs `cyanbeat` and
+`cyanbeat-remote`, the desktop entry and the icon).
+
+## Remote
+
+```sh
+cyanbeat-remote -u          # toggle pause      -p play   -s stop
+cyanbeat-remote -n / -r     # next / previous   -S shuffle  -R repeat
+cyanbeat-remote -v +5%      # volume: 50, 50%, +5%, -5%
+cyanbeat-remote -k +10      # seek: 90, +10, -10, 1:30, +1m
+cyanbeat-remote -Q          # status, in cmus-remote's format
+cyanbeat-remote --or-cmus -u   # CyanBeat if it's running, else cmus
+```
 
 ## Keys
 
