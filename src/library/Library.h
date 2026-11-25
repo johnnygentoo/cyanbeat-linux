@@ -49,6 +49,13 @@ public:
     // Remove entries by their position among the playlist's present entries.
     void removeFromPlaylist(qint64 id, QVector<int> presentPositions);
 
+    // Duplicates: each pair is (path to remove, path to keep). The removed file
+    // goes to the Trash; its plays/rating merge into the keeper, playlists point
+    // at the keeper, and a tombstone is left for sync. Returns paths that could
+    // not be trashed (left untouched). Triggers a rescan.
+    QStringList removeDuplicates(const QVector<QPair<QString, QString>> &removeKeep);
+    QVector<Tombstone> tombstones() { return m_db.tombstones(); }
+
 Q_SIGNALS:
     void scanStarted();
     void tracksAboutToChange();  // last chance to read old indices

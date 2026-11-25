@@ -10,7 +10,7 @@
 #include <QVariant>
 
 namespace {
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 }
 
 Collection::~Collection()
@@ -67,7 +67,9 @@ bool Collection::migrate()
 
     QSqlDatabase db = QSqlDatabase::database(m_conn);
     db.transaction();
-    bool ok = exec(QStringLiteral(
+    bool ok = true;
+    if (version < 1) {
+        ok = ok && exec(QStringLiteral(
                   "CREATE TABLE IF NOT EXISTS tracks ("
                   " path TEXT PRIMARY KEY,"
                   " title TEXT, artist TEXT, album TEXT, album_artist TEXT, genre TEXT,"
@@ -77,18 +79,30 @@ bool Collection::migrate()
                   " last_played INTEGER NOT NULL DEFAULT 0,"
                   " rating INTEGER NOT NULL DEFAULT 0,"
                   " added_at INTEGER NOT NULL DEFAULT 0)"))
-        && exec(QStringLiteral(
+              && exec(QStringLiteral(
                   "CREATE TABLE IF NOT EXISTS playlists ("
                   " id INTEGER PRIMARY KEY AUTOINCREMENT,"
                   " name TEXT NOT NULL,"
                   " created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')))"))
-        && exec(QStringLiteral(
+              && exec(QStringLiteral(
                   "CREATE TABLE IF NOT EXISTS playlist_items ("
                   " playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,"
                   " pos INTEGER NOT NULL,"
                   " path TEXT NOT NULL,"
-                  " PRIMARY KEY (playlist_id, pos))"))
-        && exec(QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion));
+                  " PRIMARY KEY (playlist_id, pos))"));
+    }
+    if (version < 2) {
+        // Files removed on purpose (e.g. duplicates). Phone sync reads this so a
+        // merge doesn't copy them straight back from the other side.
+        ok = ok && exec(QStringLiteral(
+                  "CREATE TABLE IF NOT EXISTS tombstones ("
+                  " path TEXT PRIMARY KEY,"
+                  " size_bytes INTEGER,"
+                  " removed_at INTEGER NOT NULL,"
+                  " reason TEXT,"
+                  " kept_path TEXT)"));
+    }
+    ok = ok && exec(QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion));
     if (ok)
         db.commit();
     else
@@ -185,6 +199,15 @@ void Collection::saveStats(const Track &t)
     q.exec();
 }
 
+void Collection::saveAddedAt(const Track &t)
+{
+    QSqlQuery q(QSqlDatabase::database(m_conn));
+    q.prepare(QStringLiteral("UPDATE tracks SET added_at=? WHERE path=?"));
+    q.addBindValue(t.addedAt);
+    q.addBindValue(t.path);
+    q.exec();
+}
+
 // ---------------------------------------------------------------- playlists
 
 QVector<Playlist> Collection::playlists()
@@ -276,4 +299,59 @@ void Collection::setPlaylistItems(qint64 id, const QStringList &paths)
         ins.exec();
     }
     db.commit();
+}
+
+// ---------------------------------------------------------------- tombstones
+
+void Collection::addTombstone(const QString &path, qint64 sizeBytes, const QString &reason, const QString &keptPath)
+{
+    QSqlQuery q(QSqlDatabase::database(m_conn));
+    q.prepare(QStringLiteral("INSERT OR REPLACE INTO tombstones (path, size_bytes, removed_at, reason, kept_path)"
+                             " VALUES (?, ?, strftime('%s','now'), ?, ?)"));
+    q.addBindValue(path);
+    q.addBindValue(sizeBytes);
+    q.addBindValue(reason);
+    q.addBindValue(keptPath);
+    q.exec();
+}
+
+QVector<Tombstone> Collection::tombstones()
+{
+    QVector<Tombstone> out;
+    QSqlQuery q(QSqlDatabase::database(m_conn));
+    q.exec(QStringLiteral("SELECT path, size_bytes, removed_at, reason, kept_path FROM tombstones"));
+    while (q.next())
+        out.push_back({q.value(0).toString(), q.value(1).toLongLong(), q.value(2).toLongLong(),
+                       q.value(3).toString(), q.value(4).toString()});
+    return out;
+}
+
+void Collection::repointPlaylists(const QString &from, const QString &to)
+{
+    QVector<qint64> ids;
+    {
+        QSqlQuery q(QSqlDatabase::database(m_conn));
+        q.prepare(QStringLiteral("SELECT DISTINCT playlist_id FROM playlist_items WHERE path = ?"));
+        q.addBindValue(from);
+        q.exec();
+        while (q.next())
+            ids << q.value(0).toLongLong();
+    }
+    for (qint64 id : std::as_const(ids)) {
+        // Swap in the keeper; if the playlist already had it, keep only its first spot.
+        QStringList items = playlistItems(id);
+        QStringList out;
+        bool haveKeeper = false;
+        for (QString p : std::as_const(items)) {
+            if (p == from)
+                p = to;
+            if (p == to) {
+                if (haveKeeper)
+                    continue;
+                haveKeeper = true;
+            }
+            out << p;
+        }
+        setPlaylistItems(id, out);
+    }
 }

@@ -22,6 +22,12 @@ Early (v0.1.0). Working now:
   Date Added (when the file landed on disk), Last Played. Right-click the column
   header to show/hide columns.
 - Drag songs out of the list into a file manager.
+- Find Duplicates (Tools menu): identical files, the same YouTube video saved twice
+  (`[id]` and `-id` names), and the same song under different names (artist/title in
+  any order, track numbers and "(Official Video)" ignored, lengths must match). The
+  worse copy is pre-checked by real sound quality (codec, bitrate, lossless, cut-off
+  downloads) or by size. Removal goes to the Trash; plays, ratings and playlists move
+  to the copy you keep. `cyanbeat --list-duplicates` prints the same report.
 - MPRIS (`org.mpris.MediaPlayer2.cyanbeat`): media keys, `playerctl`, waybar's
   `mpris` module and KDE Connect see it. Launching it again raises the open window.
 - `cyanbeat-remote`: cmus-remote's flags and `-Q` output, plus `--or-cmus` to fall
@@ -45,7 +51,8 @@ Early (v0.1.0). Working now:
 
 ## Build
 
-Needs Qt 6.5+ (Widgets, Concurrent, Svg, Sql with the SQLite driver, DBus), GStreamer 1.x with base/good plugins
+Needs Qt 6.5+ (Widgets, Concurrent, Svg, Sql with the SQLite driver, DBus), GStreamer 1.x with
+base/good plugins and pbutils
 (and libav or ugly for wma/aac), TagLib 2, CMake 3.21+.
 
 ```sh

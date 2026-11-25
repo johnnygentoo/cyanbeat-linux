@@ -7,6 +7,14 @@
 #include <QStringList>
 #include <QVector>
 
+struct Tombstone {
+    QString path;
+    qint64 sizeBytes = 0;
+    qint64 removedAt = 0;
+    QString reason;
+    QString keptPath;
+};
+
 struct Playlist {
     qint64 id = 0;
     QString name;
@@ -33,6 +41,7 @@ public:
     // Writes new/changed rows and deletes rows whose path is in `removed`.
     void saveTracks(const TrackList &changed, const QStringList &removed);
     void saveStats(const Track &t);  // play count, last played, rating
+    void saveAddedAt(const Track &t);
 
     // ---- playlists
     QVector<Playlist> playlists();
@@ -42,6 +51,13 @@ public:
     QStringList playlistItems(qint64 id);          // paths, in order
     void appendToPlaylist(qint64 id, const QStringList &paths);
     void setPlaylistItems(qint64 id, const QStringList &paths);  // replace the whole order
+
+    // Point every playlist entry for `from` at `to` (dropping repeats of `to`).
+    void repointPlaylists(const QString &from, const QString &to);
+
+    // ---- removed on purpose
+    void addTombstone(const QString &path, qint64 sizeBytes, const QString &reason, const QString &keptPath);
+    QVector<Tombstone> tombstones();
 
 private:
     bool exec(const QString &sql);

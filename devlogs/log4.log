@@ -1,0 +1,75 @@
+================================================================================
+CyanBeat Linux — Dev Log #4
+JohnnyGentoo Studios
+Date: 2026-11-25
+Phase: Duplicate finder (user request) — find copies, keep the best, trash the rest
+Branch: main
+Author: Claude
+================================================================================
+
+USER REQUEST
+  - "find dupes of files and offers to remove the worst one".
+
+WHAT THE LIBRARY ACTUALLY HAS (surveyed ~/Music first)
+  - Same YouTube video saved twice: "Title [id].mp3" (current yt-dlp) next to
+    "Title-id.mp3" (older default); also mp3 next to the original .webm.
+  - Artist/title swapped: "Stayin' Alive-Why Mona" vs "why mona - Stayin' Alive".
+  - Track numbers / tags / file names: "03 Candy Bars [id].mp3", "03 Candy Bars.wma"
+    (tagged Grand Buffet), "Grand Buffet - Candy Bars.mp3".
+  - Covers that must NOT match: "Stayin' Alive (Gospel & Choir)".
+
+MATCHING  (src/library/Duplicates.*)
+  - SameBytes: files sharing a size are SHA-1'd; identical → group.
+  - SameVideo: YouTube id at the END of the name, "[id]" or "-id". An 11-letter
+    plain word is not an id — "[Arrangement]" had grouped two different Castlevania
+    tracks in the first dry run.
+  - SameSong: sorted unique words of artist+title (any order), after dropping the id,
+    leading track numbers and brackets with noise words (official, video, audio,
+    lyrics, hd, 4k, visualizer, remaster(ed), stereo, …); lengths within
+    max(2.5 s, 1 %). Artist comes from tags, else "Artist - Title" in the file name.
+    An untagged title attaches to a named copy only if exactly ONE artist fits —
+    otherwise two artists' same-named songs chained into one group (test caught it).
+  - Union-find merges the three; each group remembers which reasons applied.
+
+RANKING
+  - GstDiscoverer per candidate (only group members, ~160 files): codec, audio
+    bitrate, sample rate, channels, video stream (cover art excluded), duration.
+    TagLib bitrate fallback; size/duration estimate (marked ~) only without video.
+  - Best quality: lossless > lossy bitrate × codec factor (opus 1.6, aac 1.3, vorbis
+    1.25, mp3 1.0, wma 0.9). Copies > 5 s shorter than the longest = cut-off
+    download, ×0.3 / never kept. A video stream costs a point (tie-break).
+  - Smallest file: smallest non-truncated copy.
+  - Ties: tagged copy, then the one with more plays/rating.
+
+REMOVAL  (Library::removeDuplicates, Collection schema v2)
+  - QFile::moveToTrash — never a hard delete. A file that can't be trashed is
+    reported and nothing about it changes.
+  - Keeper gets the plays added, the higher rating, the later Last Played, the
+    earlier Date Added. Playlists are repointed to the keeper (a repeat in the same
+    playlist collapses to its first spot).
+  - New tombstones table (path, size, removed_at, reason, kept_path): phone sync
+    will read it so a two-way merge doesn't copy removed files back from the phone.
+  - Migration v1 → v2 verified on a copy of the real database (playlists intact).
+
+UI  (ui/DuplicatesDialog, Tools › Find Duplicates…)
+  - Group header (name, copies, why); rows with checkbox (checked = remove), keep/
+    remove, sound ("MP3 · 127 kbps · 48 kHz"), length, size, plays. Same-song-only
+    groups dimmed, and can be hidden ("Include same-song matches"). Keep: best
+    quality / smallest file re-picks instantly. A group can never be fully checked.
+    Double-click previews; right-click Play / Show in Folder. Confirm before Trash.
+  - `cyanbeat --list-duplicates` prints the report (keeper marked *).
+  - QSS: visible check boxes, combo box, progress bar.
+
+DRY RUN ON THE REAL LIBRARY (read-only, scratch database)
+  - 6 s, 76 groups, 85 files pre-checked, 637 MB. Spot-checked: RAT TAXI keeps the
+    140 kbps Opus .webm over a 64 kbps mp3; Candy Bars keeps the 192 kbps WMA; the
+    Castlevania false positive is gone. Some same-title pairs are different uploads
+    of the same song (two "Hot Stuff" ids) — that's what the dimming is for.
+  - Nothing was removed from ~/Music.
+
+TESTS
+  - duplicates_test (20 checks): id styles, the [Arrangement] case, swaps, covers,
+    different artists, live versions, mp3+webm, scoring order, truncation.
+  - collection_test: removal → Trash, stats merge, playlist repoint + de-repeat,
+    tombstone, rescan drops it, unknown path reported. Its Trash lives in the
+    temp dir (an earlier run left a file in /tmp/.Trash-1000; cleaned up).

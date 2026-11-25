@@ -5,10 +5,12 @@
 #include "ui/SourceList.h"
 
 #include <QMainWindow>
+#include <QPointer>
 #include <QStringList>
 #include <QVector>
 
 class BrowserPanes;
+class DuplicatesDialog;
 class LcdDisplay;
 class Library;
 class QAction;
@@ -57,6 +59,7 @@ private:
     void onLibraryChanged();
     void updateSummary();
     void maybeSnapshot();
+    void showDuplicates();
 
     // Playback (the queue lives in Player).
     void playFromRow(int proxyRow);
@@ -89,6 +92,7 @@ private:
     QAction *m_browserAction = nullptr;
     QAction *m_shuffleAction = nullptr;
     QTimer *m_searchDebounce = nullptr;
+    QPointer<DuplicatesDialog> m_dupes;
 
     QString m_snapshotPath;
 

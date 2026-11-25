@@ -4,6 +4,7 @@
 #include "library/Library.h"
 #include "library/TrackModel.h"
 #include "ui/BrowserPanes.h"
+#include "ui/DuplicatesDialog.h"
 #include "ui/LcdDisplay.h"
 #include "ui/RatingDelegate.h"
 #include "ui/Theme.h"
@@ -209,6 +210,9 @@ void MainWindow::buildMenus()
     m_shuffleAction->setCheckable(true);
     connect(m_shuffleAction, &QAction::toggled, m_player, &Player::setShuffle);
     controls->addAction(tr("Cycle Repeat (Off / All / One)"), m_player, &Player::cycleRepeat);
+
+    QMenu *tools = menuBar()->addMenu(tr("&Tools"));
+    tools->addAction(tr("Find &Duplicates…"), this, &MainWindow::showDuplicates);
 
     QMenu *view = menuBar()->addMenu(tr("&View"));
     m_browserAction = view->addAction(tr("Show Column &Browser"));
@@ -693,6 +697,17 @@ void MainWindow::onLibraryChanged()
     refilter();
 }
 
+void MainWindow::showDuplicates()
+{
+    if (!m_dupes) {
+        m_dupes = new DuplicatesDialog(m_library, m_player, this);
+        m_dupes->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    m_dupes->show();
+    m_dupes->raise();
+    m_dupes->activateWindow();
+}
+
 void MainWindow::maybeSnapshot()
 {
     if (!m_snapshotPath.isEmpty()) {
@@ -710,6 +725,15 @@ void MainWindow::maybeSnapshot()
             else
                 want.id = src.section(QLatin1Char(':'), 1).toLongLong();
             m_sources->select(want);
+        }
+        if (qEnvironmentVariableIsSet("CYANBEAT_SNAPSHOT_DUPES")) {  // grab the duplicates dialog instead
+            showDuplicates();
+            m_dupes->resize(1180, 720);
+            QTimer::singleShot(15000, this, [this, path] {
+                m_dupes->grab().save(path);
+                QApplication::quit();
+            });
+            return;
         }
         const bool play = qEnvironmentVariableIsSet("CYANBEAT_SNAPSHOT_PLAY");
         if (play)

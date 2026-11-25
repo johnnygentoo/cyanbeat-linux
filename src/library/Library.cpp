@@ -257,3 +257,40 @@ void Library::removeFromPlaylist(qint64 id, QVector<int> presentPositions)
     m_db.setPlaylistItems(id, kept);
     Q_EMIT playlistContentsChanged(id);
 }
+
+// ---------------------------------------------------------------- duplicates
+
+QStringList Library::removeDuplicates(const QVector<QPair<QString, QString>> &removeKeep)
+{
+    QStringList failed;
+    bool any = false;
+    for (const auto &[gone, kept] : removeKeep) {
+        const int gi = indexOfPath(gone), ki = indexOfPath(kept);
+        if (gi < 0 || ki < 0 || gi == ki) {
+            failed << gone;
+            continue;
+        }
+        const Track old = m_tracks[gi];
+        if (!QFile::moveToTrash(gone)) {
+            failed << gone;
+            continue;
+        }
+        any = true;
+        Track &keep = m_tracks[ki];
+        keep.playCount += old.playCount;
+        keep.lastPlayed = qMax(keep.lastPlayed, old.lastPlayed);
+        keep.rating = qMax(keep.rating, old.rating);
+        if (old.addedAt > 0 && (keep.addedAt <= 0 || old.addedAt < keep.addedAt))
+            keep.addedAt = old.addedAt;  // you've had the song since the older copy arrived
+        m_db.saveStats(keep);
+        m_db.saveAddedAt(keep);
+        m_db.repointPlaylists(gone, kept);
+        m_db.addTombstone(gone, old.sizeBytes, QStringLiteral("duplicate"), kept);
+        Q_EMIT trackUpdated(ki);
+    }
+    if (any) {
+        Q_EMIT playlistsChanged();
+        rescan();
+    }
+    return failed;
+}

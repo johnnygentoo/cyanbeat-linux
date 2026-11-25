@@ -23,7 +23,7 @@ if(CYANBEAT_MPRIS)
   find_package(Qt6 REQUIRED COMPONENTS DBus)
 endif()
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0 gstreamer-audio-1.0)
+pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0 gstreamer-audio-1.0 gstreamer-pbutils-1.0)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 
 # Everything except main.cpp lives in a static lib so tests can link it.
@@ -33,11 +33,13 @@ add_library(cyanbeat_core STATIC
   src/library/Track.cpp
   src/library/Scanner.cpp
   src/library/Collection.cpp
+  src/library/Duplicates.cpp
   src/library/Library.cpp
   src/library/TrackModel.cpp
   src/ui/Theme.cpp
   src/ui/LcdDisplay.cpp
   src/ui/BrowserPanes.cpp
+  src/ui/DuplicatesDialog.cpp
   src/ui/RatingDelegate.cpp
   src/ui/SourceList.cpp
   src/ui/MainWindow.cpp
@@ -71,6 +73,9 @@ if(BUILD_TESTING)
   qt_add_executable(collection_test tests/collection_test.cpp)
   target_link_libraries(collection_test PRIVATE cyanbeat_core)
   add_test(NAME collection_test COMMAND collection_test)
+  qt_add_executable(duplicates_test tests/duplicates_test.cpp)
+  target_link_libraries(duplicates_test PRIVATE cyanbeat_core)
+  add_test(NAME duplicates_test COMMAND duplicates_test)
 endif()
 
 install(TARGETS cyanbeat RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

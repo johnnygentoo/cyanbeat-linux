@@ -45,10 +45,13 @@ int main(int argc, char **argv)
 {
     QTemporaryDir tmp;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(tmp.filePath(QStringLiteral("config"))));
+    // Same filesystem as the music folder, so "Trash" lands inside tmp and is cleaned up with it.
+    qputenv("XDG_DATA_HOME", QFile::encodeName(tmp.filePath(QStringLiteral("data"))));
     QCoreApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("CyanBeatTest"));
     QCoreApplication::setApplicationName(QStringLiteral("collection_test"));
 
+    QDir().mkpath(tmp.filePath(QStringLiteral("data")));
     const QString music = tmp.filePath(QStringLiteral("music"));
     QDir().mkpath(music);
     for (const char *n : {"a", "b", "c", "d"})
@@ -116,6 +119,32 @@ int main(int argc, char **argv)
         lib.deletePlaylist(pid);
         CHECK(lib.playlists().isEmpty(), "playlist deleted");
         CHECK(lib.playlistTracks(pid).isEmpty(), "its entries went with it");
+    }
+    {
+        // Duplicate removal: c is the worse copy of b.
+        Library lib(db);
+        lib.start();
+        waitScan(lib);
+        auto path = [&](const char *n) { return music + QLatin1Char('/') + QLatin1String(n) + QStringLiteral(".mp3"); };
+        auto idx = [&](const char *n) { return lib.indexOfPath(path(n)); };
+        lib.recordPlay(idx("b"));
+        lib.setRating(idx("b"), 2);
+        // c already has rating 4 and is in the playlist twice-over via b.
+        const qint64 mix = lib.createPlaylist(QStringLiteral("dupes"), {idx("c"), idx("d"), idx("b")});
+        const QStringList failed = lib.removeDuplicates({{path("c"), path("b")}});
+        CHECK(failed.isEmpty(), "removal reported no failures");
+        CHECK(!QFile::exists(path("c")), "worse copy moved out of the music folder (Trash)");
+        CHECK(lib.tracks()[idx("b")].playCount == 1 && lib.tracks()[idx("b")].rating == 4,
+              "keeper took the higher rating and kept its plays");
+        CHECK(names(lib, lib.playlistTracks(mix)) == QStringList({"b", "d"}),
+              "playlist now points at the keeper, without a repeat");
+        const auto stones = lib.tombstones();
+        CHECK(stones.size() == 1 && stones[0].path == path("c") && stones[0].keptPath == path("b"),
+              "tombstone recorded for sync");
+        waitScan(lib);
+        CHECK(idx("c") < 0 && lib.tracks().size() == 3, "rescan dropped the removed copy");
+        CHECK(lib.removeDuplicates({{path("zzz"), path("b")}}) == QStringList({path("zzz")}),
+              "unknown path is reported, nothing touched");
     }
     std::fprintf(stderr, failures ? "%d FAILED\n" : "all passed\n", failures);
     return failures ? 1 : 0;
