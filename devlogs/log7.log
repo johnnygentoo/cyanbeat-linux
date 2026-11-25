@@ -72,3 +72,17 @@ MTP (sync/Transport, libmtp)
 
 CYANBEAT_NO_ADB=1 keeps snapshot/test runs off connected phones (an earlier
 snapshot run had polled the real phone read-only: adb devices/getprop).
+
+MTP ON THE REAL PHONE (addendum, user unlocked it and said go)
+  - Locked phone: session opens but "Get Storage information failed" — Android hides
+    storage over MTP while locked. The app now says "unlock it / tap Allow" instead
+    of a blank error.
+  - Unlocked: read-only MTP listing of /sdcard/Music = adb's exactly (3,786 files,
+    paths and sizes). Full 16-check sync suite over MTP (setup/verification via adb)
+    in a throwaway /sdcard/Music/cyanbeat-synctest-<pid>: all pass; folder removed.
+  - Identity: over MTP the Galaxy reports serial 386B9074… (a hash), not
+    ro.serialno R5CY33JVC6T — the phone would have shown up twice and lost its sync
+    history over MTP. Fix: adb's "usb:5-2" → sysfs busnum/devnum 5:7 = the MTP
+    location, so a phone on both is one phone (adb preferred) and its MTP serial is
+    remembered; MTP-only later maps back to R5CY33JVC6T. devices_test (real phone,
+    read-only; CYANBEAT_ONLY_MTP fakes "developer mode off") passes.

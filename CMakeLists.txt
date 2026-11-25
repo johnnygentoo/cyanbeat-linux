@@ -108,6 +108,11 @@ if(BUILD_TESTING)
   target_link_libraries(sync_emulator_test PRIVATE cyanbeat_core)
   add_test(NAME sync_emulator_test COMMAND sync_emulator_test)
   set_tests_properties(sync_emulator_test PROPERTIES SKIP_RETURN_CODE 77)
+  # Real phone, read-only: CYANBEAT_TEST_PHONE=<ro.serialno>
+  qt_add_executable(devices_test tests/devices_test.cpp)
+  target_link_libraries(devices_test PRIVATE cyanbeat_core)
+  add_test(NAME devices_test COMMAND devices_test)
+  set_tests_properties(devices_test PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 install(TARGETS cyanbeat RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

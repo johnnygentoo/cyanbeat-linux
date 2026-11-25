@@ -73,6 +73,12 @@ public:
         }
         LIBMTP_Get_Storage(m_dev, LIBMTP_STORAGE_SORTBY_NOTSORTED);
         m_storage = m_dev->storage ? m_dev->storage->id : 0;
+        if (!m_storage) {
+            LIBMTP_Clear_Errorstack(m_dev);
+            // Seen on a locked Galaxy: the session opens but no storage is offered.
+            m_error = QStringLiteral("the phone isn't sharing its storage over MTP — unlock it, and tap \"Allow\" "
+                                     "if it asks about access to phone data");
+        }
     }
     ~MtpTransport() override
     {

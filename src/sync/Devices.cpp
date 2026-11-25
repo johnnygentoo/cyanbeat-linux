@@ -4,6 +4,7 @@
 #include "sync/Adb.h"
 #include "sync/Mtp.h"
 
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -24,6 +25,7 @@ QVector<Devices::Phone> loadKnown()
         p.model = o.value(QStringLiteral("model")).toString();
         p.lastIp = o.value(QStringLiteral("lastIp")).toString();
         p.tcpip = o.value(QStringLiteral("tcpip")).toBool();
+        p.mtpSerial = o.value(QStringLiteral("mtpSerial")).toString();
         if (!p.id.isEmpty())
             out << p;
     }
@@ -35,7 +37,8 @@ void saveKnown(const QVector<Devices::Phone> &phones)
     QJsonArray arr;
     for (const Devices::Phone &p : phones)
         arr << QJsonObject{{QStringLiteral("id"), p.id}, {QStringLiteral("model"), p.model},
-                           {QStringLiteral("lastIp"), p.lastIp}, {QStringLiteral("tcpip"), p.tcpip}};
+                           {QStringLiteral("lastIp"), p.lastIp}, {QStringLiteral("tcpip"), p.tcpip},
+                           {QStringLiteral("mtpSerial"), p.mtpSerial}};
     QSettings().setValue(QStringLiteral("sync/phones"), QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
 }
@@ -79,10 +82,31 @@ void Devices::startJob(std::function<Snapshot()> job)
     m_watcher.setFuture(QtConcurrent::run(std::move(job)));
 }
 
+namespace {
+// adb's "usb:5-2" is a sysfs port path; MTP locations are "<busnum>:<devnum>".
+QString usbLocation(const QString &port)
+{
+#ifdef Q_OS_LINUX
+    auto read = [&](const char *what) {
+        QFile f(QStringLiteral("/sys/bus/usb/devices/%1/%2").arg(port, QLatin1String(what)));
+        return f.open(QIODevice::ReadOnly) ? QString::fromLatin1(f.readAll()).trimmed() : QString();
+    };
+    const QString bus = read("busnum"), dev = read("devnum");
+    return bus.isEmpty() || dev.isEmpty() ? QString() : bus + QLatin1Char(':') + dev;
+#else
+    Q_UNUSED(port);
+    return {};
+#endif
+}
+}
+
 QVector<Devices::Phone> Devices::scan()
 {
     QVector<Phone> out;
-    const QVector<Adb::Device> adbDevices = m_adb ? Adb::devices() : QVector<Adb::Device>();
+    QHash<QString, QString> idByUsb;  // MTP location → hardware serial of the adb phone there
+    // CYANBEAT_ONLY_MTP: testing aid — pretend developer mode is off.
+    const QVector<Adb::Device> adbDevices = m_adb && !qEnvironmentVariableIsSet("CYANBEAT_ONLY_MTP")
+                                                ? Adb::devices() : QVector<Adb::Device>();
     for (const Adb::Device &d : adbDevices) {
         Phone p;
         p.transport = d.serial;
@@ -98,6 +122,9 @@ QVector<Devices::Phone> Devices::scan()
             if (p.model.isEmpty())
                 p.model = Adb::getprop(d.serial, QStringLiteral("ro.product.model"));
             p.lastIp = Adb::wifiAddress(d.serial);
+            if (!d.usbPort.isEmpty())
+                if (const QString loc = usbLocation(d.usbPort); !loc.isEmpty())
+                    idByUsb.insert(loc, p.id);
         } else {
             continue;  // offline
         }
@@ -119,16 +146,26 @@ QVector<Devices::Phone> Devices::scan()
         QHash<QString, QPair<QString, QString>> seen;
         for (const Mtp::Device &d : Mtp::devicesCached(m_mtpCache)) {
             seen.insert(d.location, {d.serial, d.model});
-            bool viaAdb = false;
-            for (const Phone &p : std::as_const(out))
-                viaAdb = viaAdb || (!d.serial.isEmpty() && p.id == d.serial);
-            if (viaAdb)
+            // Same USB device as an adb phone: one phone. Remember what it calls
+            // itself over MTP, so an MTP-only visit later is still recognised.
+            if (const QString id = idByUsb.value(d.location); !id.isEmpty()) {
+                for (Phone &p : out)
+                    if (p.id == id)
+                        p.mtpSerial = d.serial;
                 continue;
+            }
             Phone p;
-            p.id = d.serial.isEmpty() ? QStringLiteral("mtp:") + d.location : d.serial;
-            p.model = d.model;
             p.transport = QStringLiteral("mtp:") + d.location;
             p.mtp = true;
+            p.mtpSerial = d.serial;
+            p.model = d.model;
+            p.id = d.serial.isEmpty() ? QStringLiteral("mtp:") + d.location : d.serial;
+            for (const Phone &k : std::as_const(m_phones))
+                if (!d.serial.isEmpty() && k.mtpSerial == d.serial) {
+                    p.id = k.id;  // seen over adb before: keep its id (and its sync history)
+                    if (!k.model.isEmpty())
+                        p.model = k.model;
+                }
             out << p;
         }
         m_mtpCache = seen;
@@ -147,6 +184,8 @@ void Devices::remember(const QVector<Phone> &connected)
                 c.tcpip = k.tcpip;
                 if (c.lastIp.isEmpty())
                     c.lastIp = k.lastIp;
+                if (c.mtpSerial.isEmpty())
+                    c.mtpSerial = k.mtpSerial;
             }
     }
     for (const Phone &k : std::as_const(m_phones)) {

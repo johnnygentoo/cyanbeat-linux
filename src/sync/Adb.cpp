@@ -75,6 +75,8 @@ QVector<Device> devices()
         for (const QString &kv : parts.mid(2))
             if (kv.startsWith(QLatin1String("model:")))
                 d.model = kv.mid(6);
+            else if (kv.startsWith(QLatin1String("usb:")))
+                d.usbPort = kv.mid(4);
         d.wireless = d.serial.contains(QLatin1Char(':')) || d.serial.contains(QLatin1String("._adb-tls-connect."));
         out << d;
     }

@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// End-to-end sync against a real adb device (use an emulator!). Works only in a
-// throwaway folder it creates and removes: /sdcard/Music/cyanbeat-synctest-<pid>.
-// Needs CYANBEAT_TEST_ADB_SERIAL; skips (77) without it.
+// End-to-end sync against a real device. Works only in a throwaway folder it
+// creates and removes: /sdcard/Music/cyanbeat-synctest-<pid>.
+// Needs CYANBEAT_TEST_ADB_SERIAL (setup + checking go through adb); skips (77)
+// without it. CYANBEAT_TEST_SYNC_TRANSPORT=mtp:<bus>:<dev> runs the sync itself
+// over MTP instead. CYANBEAT_TEST_COMPARE_ROOT=/sdcard/Music first compares a
+// read-only MTP listing of that folder with adb's.
 #include "library/Library.h"
 #include "sync/Adb.h"
 #include "sync/SyncSession.h"
+#include "sync/Transport.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QHash>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -59,6 +64,30 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("CyanBeatTest"));
     QCoreApplication::setApplicationName(QStringLiteral("sync_test"));
+    const QString via = qEnvironmentVariable("CYANBEAT_TEST_SYNC_TRANSPORT", serial);
+    std::fprintf(stderr, "sync via %s, checked via adb %s\n", qPrintable(via), qPrintable(serial));
+
+    if (const QString root = qEnvironmentVariable("CYANBEAT_TEST_COMPARE_ROOT"); !root.isEmpty()) {
+        // Read-only: the same folder seen through the sync transport and through adb.
+        bool okA = false, okB = false;
+        const auto t = Transport::open(via);
+        CHECK(t && t->ok(), "transport opens");
+        QHash<QString, qint64> viaT, viaAdb;
+        if (t && t->ok())
+            for (const auto &f : t->list(root, &okA))
+                viaT.insert(f.path, f.size);
+        for (const auto &f : Adb::listFiles(serial, root, &okB))
+            viaAdb.insert(f.path, f.size);
+        std::fprintf(stderr, "  %s: %lld files via %s, %lld via adb\n", qPrintable(root), (long long)viaT.size(),
+                     qPrintable(via), (long long)viaAdb.size());
+        int mismatched = 0;
+        for (auto it = viaAdb.cbegin(); it != viaAdb.cend(); ++it)
+            if (viaT.value(it.key(), -1) != it.value()) {
+                if (++mismatched <= 5)
+                    std::fprintf(stderr, "    differs: %s\n", qPrintable(it.key()));
+            }
+        CHECK(okA && viaT.size() == viaAdb.size() && mismatched == 0, "listing matches adb exactly (paths and sizes)");
+    }
 
     const QString local = tmp.filePath(QStringLiteral("music"));
     const QString remote = QStringLiteral("/sdcard/Music/cyanbeat-synctest-%1").arg(QCoreApplication::applicationPid());
@@ -90,14 +119,14 @@ int main(int argc, char **argv)
     SyncSession::Report report;
     QObject::connect(&sync, &SyncSession::finished, [&](const SyncSession::Report &r) { report = r; });
 
-    sync.scan(serial, QStringLiteral("test-phone"), SyncPlan::Mode::Merge);
+    sync.scan(via, QStringLiteral("test-phone"), SyncPlan::Mode::Merge);
     waitSignal(&sync, &SyncSession::planned);
     CHECK(count(plan, SyncPlan::Action::Push) == 3, "merge plan: 3 to push (pc only, odd name, sub/deep)");
     CHECK(count(plan, SyncPlan::Action::Pull) == 2, "merge plan: 2 to pull (phone only, phone-sub/new.opus)");
     CHECK(count(plan, SyncPlan::Action::DeleteRemote) == 1, "merge plan: removed duplicate offered for deletion on phone");
     CHECK(plan.freeOnPhone > 0, "free space on phone read");
 
-    sync.run(serial, QStringLiteral("test-phone"), plan);
+    sync.run(via, QStringLiteral("test-phone"), plan);
     waitSignal(&sync, &SyncSession::finished, 120000);
     CHECK(report.pushed == 3 && report.pulled == 2 && report.deletedRemote == 1 && report.failed == 0,
           "run: 3 pushed, 2 pulled, 1 deleted on phone, 0 failed");
@@ -123,7 +152,7 @@ int main(int argc, char **argv)
 
     // Second scan: everything in step.
     waitSignal(&lib, &Library::scanFinished, 5000);
-    sync.scan(serial, QStringLiteral("test-phone"), SyncPlan::Mode::Mirror);
+    sync.scan(via, QStringLiteral("test-phone"), SyncPlan::Mode::Mirror);
     waitSignal(&sync, &SyncSession::planned);
     int pending = 0;
     for (const auto &fp : plan.folders)
@@ -133,11 +162,11 @@ int main(int argc, char **argv)
     // Mirror: delete one on each side, mirror should carry both deletions across.
     Adb::remove(serial, remote + QStringLiteral("/pc only.mp3"));
     QFile::remove(local + QStringLiteral("/phone only.mp3"));
-    sync.scan(serial, QStringLiteral("test-phone"), SyncPlan::Mode::Mirror);
+    sync.scan(via, QStringLiteral("test-phone"), SyncPlan::Mode::Mirror);
     waitSignal(&sync, &SyncSession::planned);
     CHECK(count(plan, SyncPlan::Action::DeleteLocal) == 1 && count(plan, SyncPlan::Action::DeleteRemote) == 1,
           "mirror: deletion on each side is proposed for the other");
-    sync.scan(serial, QStringLiteral("test-phone"), SyncPlan::Mode::Merge);
+    sync.scan(via, QStringLiteral("test-phone"), SyncPlan::Mode::Merge);
     waitSignal(&sync, &SyncSession::planned);
     CHECK(count(plan, SyncPlan::Action::Push) == 1 && count(plan, SyncPlan::Action::Pull) == 1
               && count(plan, SyncPlan::Action::DeleteLocal) == 0,

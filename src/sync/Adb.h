@@ -13,6 +13,7 @@ struct Device {
     QString state;      // "device", "unauthorized", "offline"
     QString model;      // "SM_S936U"
     bool wireless = false;
+    QString usbPort;    // "5-2" from `usb:5-2` (sysfs port path), cabled only
 };
 
 struct RemoteFile {

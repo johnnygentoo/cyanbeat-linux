@@ -23,6 +23,7 @@ public:
         QString lastIp;     // wlan0 address last seen
         bool tcpip = false; // `adb tcpip 5555` was set up from here
         bool mtp = false;   // reachable only over MTP ("File transfer", no developer mode)
+        QString mtpSerial;  // what the phone calls itself over MTP (often a hash, not ro.serialno)
     };
 
     explicit Devices(QObject *parent = nullptr);
