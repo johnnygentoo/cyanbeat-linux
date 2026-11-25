@@ -195,7 +195,12 @@ QSlider::groove:vertical {
     border: 1px solid rgba(21, 244, 238, 0.30);
     border-radius: 2px;
 }
-QSlider::add-page:vertical { background: rgba(21, 244, 238, 0.55); border-radius: 2px; }
+QSlider::add-page:vertical {
+    /* violet at the bottom rising into cyan, see-through like the curve */
+    background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
+                                stop:0 rgba(160, 107, 255, 0.70), stop:1 rgba(21, 244, 238, 0.70));
+    border-radius: 2px;
+}
 QSlider::handle:vertical {
     background: #15F4EE;
     height: 10px; width: 18px;

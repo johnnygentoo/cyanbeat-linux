@@ -82,11 +82,22 @@ protected:
         }
         fill.lineTo(plot.right(), yOf(0));
         fill.closeSubpath();
-        QColor line = m_eq->enabled() ? Theme::Cyan : QColor(21, 244, 238, 90);
-        QColor area = line;
-        area.setAlpha(m_eq->enabled() ? 50 : 20);
-        p.fillPath(fill, area);
-        p.setPen(QPen(line, 2));
+        // Cyan lows into violet highs, see-through so the grid shows under it.
+        const bool on = m_eq->enabled();
+        QLinearGradient across(plot.left(), 0, plot.right(), 0);
+        QColor c0 = Theme::Cyan, c1 = Theme::Violet;
+        c0.setAlpha(on ? 95 : 30);
+        c1.setAlpha(on ? 95 : 30);
+        across.setColorAt(0.0, c0);
+        across.setColorAt(1.0, c1);
+        p.fillPath(fill, across);
+        QLinearGradient stroke(plot.left(), 0, plot.right(), 0);
+        QColor s0 = Theme::Cyan, s1 = Theme::Violet;
+        s0.setAlpha(on ? 255 : 110);
+        s1.setAlpha(on ? 255 : 110);
+        stroke.setColorAt(0.0, s0);
+        stroke.setColorAt(1.0, s1);
+        p.setPen(QPen(QBrush(stroke), 2));
         p.drawPath(curve);
     }
 
