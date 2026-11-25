@@ -1,5 +1,7 @@
 <!DOCTYPE RCC><RCC version="1.0"><qresource prefix="/">
   <file alias="icons/add.svg">icons/add.svg</file>
+  <file alias="icons/bars.svg">icons/bars.svg</file>
+  <file alias="icons/eq.svg">icons/eq.svg</file>
   <file alias="icons/close.svg">icons/close.svg</file>
   <file alias="icons/cyanbeat.svg">icons/cyanbeat.svg</file>
   <file alias="icons/music.svg">icons/music.svg</file>

@@ -14,6 +14,8 @@ public:
     void clearTrack();
     void setPosition(qint64 positionMs, qint64 durationMs);
     void setStatusText(const QString &text);  // shown when idle, e.g. "Scanning library…"
+    // Faint spectrum behind the text (0..1 per bar); empty = none.
+    void setBars(const QVector<float> &bars);
 
     QSize sizeHint() const override { return {520, 60}; }
     QSize minimumSizeHint() const override { return {300, 60}; }
@@ -38,4 +40,5 @@ private:
     bool m_showRemaining = true;
     bool m_dragging = false;
     qint64 m_dragMs = 0;
+    QVector<float> m_bars;
 };

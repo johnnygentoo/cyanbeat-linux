@@ -5,11 +5,16 @@
 #include "library/TrackModel.h"
 #include "ui/BrowserPanes.h"
 #include "ui/DuplicatesDialog.h"
+#include "ui/EqualizerDialog.h"
+#include "ui/VisualizerView.h"
+#include "engine/Equalizer.h"
+#include "engine/Visualizer.h"
 #include "ui/LcdDisplay.h"
 #include "ui/RatingDelegate.h"
 #include "ui/Theme.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDateTime>
@@ -27,6 +32,7 @@
 #include <QSlider>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTableView>
 #include <QTimer>
@@ -64,6 +70,9 @@ MainWindow::MainWindow(Library *library, Player *player, QWidget *parent)
     setWindowIcon(icon("cyanbeat"));
     resize(1280, 800);
 
+    m_eq = new Equalizer(m_player->engine(), this);
+    m_vis = new Visualizer(m_player, this);
+
     m_model = new TrackModel(this);
     m_proxy = new QSortFilterProxyModel(this);
     m_proxy->setSourceModel(m_model);
@@ -95,7 +104,17 @@ MainWindow::MainWindow(Library *library, Player *player, QWidget *parent)
     m_contentSplit->setStretchFactor(0, 0);
     m_contentSplit->setStretchFactor(1, 1);
     m_contentSplit->setSizes({170, 600});
-    m_mainSplit->addWidget(m_contentSplit);
+    // The browser + list, or the big visualizer in its place.
+    m_stack = new QStackedWidget(m_mainSplit);
+    m_stack->addWidget(m_contentSplit);
+    m_visView = new VisualizerView(m_vis, m_stack);
+    m_stack->addWidget(m_visView);
+    connect(m_visView, &VisualizerView::closeRequested, this, [this] { m_visAction->setChecked(false); });
+    m_mainSplit->addWidget(m_stack);
+    connect(m_vis, &Visualizer::barsChanged, this, [this] {
+        if (m_lcdBarsAction->isChecked())
+            m_lcd->setBars(m_vis->bars());
+    });
     m_mainSplit->setStretchFactor(0, 0);
     m_mainSplit->setStretchFactor(1, 1);
     m_mainSplit->setSizes({240, 1040});
@@ -211,6 +230,9 @@ void MainWindow::buildMenus()
     connect(m_shuffleAction, &QAction::toggled, m_player, &Player::setShuffle);
     controls->addAction(tr("Cycle Repeat (Off / All / One)"), m_player, &Player::cycleRepeat);
 
+    QMenu *windowMenu = menuBar()->addMenu(tr("&Window"));
+    windowMenu->addAction(tr("&Equalizer"), QKeySequence(Qt::CTRL | Qt::Key_E), this, &MainWindow::showEqualizer);
+
     QMenu *tools = menuBar()->addMenu(tr("&Tools"));
     tools->addAction(tr("Find &Duplicates…"), this, &MainWindow::showDuplicates);
 
@@ -225,6 +247,30 @@ void MainWindow::buildMenus()
         m_browser->setVisible(on);
     });
     view->addAction(tr("Go to Current Song"), QKeySequence(Qt::CTRL | Qt::Key_L), this, &MainWindow::revealPlaying);
+    view->addSeparator();
+    m_visAction = view->addAction(tr("Show &Visualizer"));
+    m_visAction->setCheckable(true);
+    m_visAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_T));
+    connect(m_visAction, &QAction::toggled, this, &MainWindow::setVisualizerShown);
+    m_lcdBarsAction = view->addAction(tr("Spectrum in the Display"));
+    m_lcdBarsAction->setCheckable(true);
+    m_lcdBarsAction->setChecked(true);
+    connect(m_lcdBarsAction, &QAction::toggled, this, [this](bool on) {
+        m_lcd->setBars(on ? m_vis->bars() : QVector<float>());
+    });
+    QMenu *engineMenu = view->addMenu(tr("Visualizer Engine"));
+    auto *engines = new QActionGroup(engineMenu);
+    QAction *useCava = engineMenu->addAction(Visualizer::cavaAvailable() ? tr("cava (your config)")
+                                                                          : tr("cava (not installed)"));
+    QAction *useBuiltIn = engineMenu->addAction(tr("Built-in"));
+    for (QAction *a : {useCava, useBuiltIn}) {
+        a->setCheckable(true);
+        engines->addAction(a);
+    }
+    useCava->setEnabled(Visualizer::cavaAvailable());
+    (m_vis->preferCava() && Visualizer::cavaAvailable() ? useCava : useBuiltIn)->setChecked(true);
+    connect(useCava, &QAction::triggered, this, [this] { m_vis->setPreferCava(true); });
+    connect(useBuiltIn, &QAction::triggered, this, [this] { m_vis->setPreferCava(false); });
     view->addAction(tr("Search"), QKeySequence::Find, this, [this] {
         m_search->setFocus();
         m_search->selectAll();
@@ -407,8 +453,19 @@ QWidget *MainWindow::buildStatusStrip()
     m_summary->setObjectName(QStringLiteral("Summary"));
     m_summary->setAlignment(Qt::AlignCenter);
     h->addWidget(m_summary, 1);
-    // Balance the left buttons so the summary sits dead centre.
-    h->addSpacing(3 * 30 + 6);
+
+    auto *eqBtn = stripButton("eq", tr("Equalizer (Ctrl+E)"));
+    connect(eqBtn, &QToolButton::clicked, this, &MainWindow::showEqualizer);
+    auto *visBtn = stripButton("bars", tr("Visualizer (Ctrl+T)"));
+    visBtn->setCheckable(true);
+    connect(visBtn, &QToolButton::toggled, this, [this](bool on) { m_visAction->setChecked(on); });
+    connect(m_visAction, &QAction::toggled, visBtn, [visBtn](bool on) {
+        const QSignalBlocker b(visBtn);
+        visBtn->setChecked(on);
+    });
+    h->addWidget(eqBtn);
+    h->addWidget(visBtn);
+    h->addSpacing(30 + 6);  // balance the left side so the summary sits centred
     return strip;
 }
 
@@ -697,6 +754,24 @@ void MainWindow::onLibraryChanged()
     refilter();
 }
 
+void MainWindow::showEqualizer()
+{
+    if (!m_eqDialog) {
+        m_eqDialog = new EqualizerDialog(m_eq, this);
+        m_eqDialog->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    m_eqDialog->show();
+    m_eqDialog->raise();
+    m_eqDialog->activateWindow();
+}
+
+void MainWindow::setVisualizerShown(bool on)
+{
+    m_stack->setCurrentWidget(on ? static_cast<QWidget *>(m_visView) : m_contentSplit);
+    if (on)
+        m_visView->setFocus();
+}
+
 void MainWindow::showDuplicates()
 {
     if (!m_dupes) {
@@ -726,6 +801,18 @@ void MainWindow::maybeSnapshot()
                 want.id = src.section(QLatin1Char(':'), 1).toLongLong();
             m_sources->select(want);
         }
+        if (qEnvironmentVariableIsSet("CYANBEAT_SNAPSHOT_EQ")) {  // grab the equalizer window
+            m_eq->applyPreset(QStringLiteral("rock"));
+            m_eq->setEnabled(true);
+            showEqualizer();
+            QTimer::singleShot(600, this, [this, path] {
+                m_eqDialog->grab().save(path);
+                QApplication::quit();
+            });
+            return;
+        }
+        if (qEnvironmentVariableIsSet("CYANBEAT_SNAPSHOT_VIS"))  // big visualizer while playing
+            m_visAction->setChecked(true);
         if (qEnvironmentVariableIsSet("CYANBEAT_SNAPSHOT_DUPES")) {  // grab the duplicates dialog instead
             showDuplicates();
             m_dupes->resize(1180, 720);
@@ -768,6 +855,10 @@ void MainWindow::onCurrentChanged(int li)
         const Track &t = m_library->tracks()[li];
         m_lcd->setTrack(t.title, t.artist, t.album);
         setWindowTitle(QStringLiteral("%1 — CyanBeat").arg(t.title));
+        QString sub = t.artist;
+        if (!t.album.isEmpty())
+            sub += (sub.isEmpty() ? QString() : QStringLiteral(" — ")) + t.album;
+        m_visView->setCaption(t.title, sub);
     }
     m_model->setPlaying(li, m_player->state() == GstEngine::State::Paused);
 }
@@ -831,6 +922,7 @@ void MainWindow::loadSettings()
     m_table->sortByColumn(m_librarySortColumn, m_librarySortOrder);
     m_table->horizontalHeader()->setSectionHidden(TrackModel::ColPos, true);
     m_browserAction->setChecked(s.value(QStringLiteral("window/browser"), true).toBool());
+    m_lcdBarsAction->setChecked(s.value(QStringLiteral("window/lcdSpectrum"), true).toBool());
     m_volume->setValue(s.value(QStringLiteral("playback/volume"), 80).toInt());
     m_player->setVolume(m_volume->value() / 100.0);
     m_player->setShuffle(s.value(QStringLiteral("playback/shuffle"), false).toBool());
@@ -847,6 +939,7 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("window/contentSplit"), m_contentSplit->saveState());
     s.setValue(QStringLiteral("window/trackHeader2"), m_table->horizontalHeader()->saveState());
     s.setValue(QStringLiteral("window/browser"), m_browserAction->isChecked());
+    s.setValue(QStringLiteral("window/lcdSpectrum"), m_lcdBarsAction->isChecked());
     s.setValue(QStringLiteral("window/librarySortColumn"), m_librarySortColumn);
     s.setValue(QStringLiteral("window/librarySortOrder"), int(m_librarySortOrder));
     s.setValue(QStringLiteral("playback/volume"), m_volume->value());

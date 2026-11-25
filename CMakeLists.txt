@@ -30,6 +30,8 @@ pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 add_library(cyanbeat_core STATIC
   src/engine/GstEngine.cpp
   src/engine/Player.cpp
+  src/engine/Equalizer.cpp
+  src/engine/Visualizer.cpp
   src/library/Track.cpp
   src/library/Scanner.cpp
   src/library/Collection.cpp
@@ -40,6 +42,8 @@ add_library(cyanbeat_core STATIC
   src/ui/LcdDisplay.cpp
   src/ui/BrowserPanes.cpp
   src/ui/DuplicatesDialog.cpp
+  src/ui/EqualizerDialog.cpp
+  src/ui/VisualizerView.cpp
   src/ui/RatingDelegate.cpp
   src/ui/SourceList.cpp
   src/ui/MainWindow.cpp

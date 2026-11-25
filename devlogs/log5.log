@@ -1,0 +1,59 @@
+================================================================================
+CyanBeat Linux — Dev Log #5
+JohnnyGentoo Studios
+Date: 2026-11-25
+Phase: 3 — Equalizer (Android bands/presets) + visualizer (cava / built-in)
+Branch: main
+Author: Claude
+================================================================================
+
+AUDIO CHAIN  (GstEngine::buildFilters, playbin3 "audio-filter")
+  audioconvert ! equalizer-nbands(8) ! audioconvert ! rglimiter ! audioconvert
+  - Missing plugins → plays without EQ/visualizer instead of failing.
+  - TAP: a buffer probe on rglimiter's src (always F32 interleaved) hands the audio
+    + rate + channels + STREAM-TIME pts to a callback; FLUSH_STOP → "flushed".
+    First attempt was tee → queue → appsink: a synced appsink stalled after ~2
+    buffers inside playbin's filter; an unsynced one ran ahead AND dragged
+    positionMs() forward (2.8 s reported after 0.8 s). Probe has neither problem.
+  - The tap fires ahead of what's heard; consumers queue chunks and release them
+    when positionMs() reaches their pts (Visualizer::tick), so bars match the ears.
+
+EQUALIZER  (engine/Equalizer, ui/EqualizerDialog)
+  - Same as the Android app: bands 60/120/400/1k/2.2k/4k/8k/12k, per-band Q from
+    neighbour spacing (bandwidth = f/Q), presets flat/rock/pop/jazz/classical/
+    dance/bass/vocal/treble. Range ±12 dB (GStreamer's iirequalizer max is +12;
+    every preset fits).
+  - No auto-headroom trim (the Android log29 lesson). rglimiter is enabled only
+    while some band is > 0 dB; flat/cuts leave the signal untouched.
+  - Custom presets: JSON in settings (eq/custom), same shape as the Android app's.
+    Built-ins read-only. Curve auto-labels as a preset when it matches one.
+  - Window › Equalizer (Ctrl+E) / strip button: On, preset combo (Manual + all),
+    Save As…, Delete (yours only), response curve (RBJ cascade @48k, same maths as
+    Android EqMath), 8 faders (0.5 dB steps, double-click → 0).
+
+VISUALIZER  (engine/Visualizer, ui/VisualizerView, LcdDisplay::setBars)
+  - cava backend (default when cava is on PATH): per-run dir in $XDG_RUNTIME_DIR
+    (cyanbeat-<pid>/) with pcm.fifo + cava/config; QProcess "cava" with
+    XDG_CONFIG_HOME pointed there — no -p on the command line, so waybar-cava.sh's
+    `pkill -f "cava -p"` can't hit it (verified in ps: /usr/bin/cava next to the
+    waybar's `cava -p …`). Config: fifo input 44.1k/16-bit, raw ASCII output to
+    stdout, 48 mono bars; [smoothing] and [eq] copied from ~/.config/cava/config.
+    Audio is resampled to 44.1k stereo S16 and written non-blocking (full pipe →
+    drop the chunk; EPIPE → reopen). SIGPIPE ignored in main.
+  - cava runs only while playing (+5 s grace); dies → built-in, retry in 10 s.
+    Runtime dir removed on stop.
+  - Built-in backend: 2048-pt FFT (Hann), 48 log bands 50 Hz–16 kHz, linear
+    magnitude √, treble weighting, cava-style autosens, gravity fall. First pass in
+    dB looked flat (everything 50–80 %); linear matches cava's shape.
+  - Colours: cava [color] gradient_color_* (if gradient = 1) else foreground.
+  - UI: View › Show Visualizer (Ctrl+T, strip button; Esc/double-click back) — big
+    bars with floor reflection, song caption, backend label. View › Spectrum in the
+    Display — faint bars behind the now-playing text. View › Visualizer Engine.
+
+VERIFIED
+  - engine_smoke: filter chain built; tap receives audio; position still tracks
+    real time; all bands −12 dB lowers the tapped level by ~16 dB.
+  - Renders: EQ window (Rock), visualizer with real cava data, built-in analyzer.
+  - ps: our cava is `/usr/bin/cava`; FIFO + runtime dir appear while playing and
+    are cleaned up on exit.
+  - NOT verified: hearing the EQ / bars against real speakers (needs the user).

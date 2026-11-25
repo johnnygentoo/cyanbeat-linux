@@ -11,6 +11,11 @@
 
 class BrowserPanes;
 class DuplicatesDialog;
+class Equalizer;
+class EqualizerDialog;
+class QStackedWidget;
+class Visualizer;
+class VisualizerView;
 class LcdDisplay;
 class Library;
 class QAction;
@@ -60,6 +65,8 @@ private:
     void updateSummary();
     void maybeSnapshot();
     void showDuplicates();
+    void showEqualizer();
+    void setVisualizerShown(bool on);
 
     // Playback (the queue lives in Player).
     void playFromRow(int proxyRow);
@@ -93,6 +100,13 @@ private:
     QAction *m_shuffleAction = nullptr;
     QTimer *m_searchDebounce = nullptr;
     QPointer<DuplicatesDialog> m_dupes;
+    QPointer<EqualizerDialog> m_eqDialog;
+    Equalizer *m_eq = nullptr;
+    Visualizer *m_vis = nullptr;
+    QStackedWidget *m_stack = nullptr;
+    VisualizerView *m_visView = nullptr;
+    QAction *m_visAction = nullptr;
+    QAction *m_lcdBarsAction = nullptr;
 
     QString m_snapshotPath;
 

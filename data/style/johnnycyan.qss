@@ -187,3 +187,20 @@ QComboBox {
 QComboBox QAbstractItemView { background-color: #1E2E3E; selection-background-color: #15F4EE; selection-color: #000000; }
 QProgressBar { border: 1px solid rgba(21, 244, 238, 0.45); border-radius: 3px; background: #091018; max-height: 8px; }
 QProgressBar::chunk { background-color: #15F4EE; }
+
+/* ---- vertical faders (equalizer) ------------------------------------------ */
+QSlider::groove:vertical {
+    width: 4px;
+    background: #091018;
+    border: 1px solid rgba(21, 244, 238, 0.30);
+    border-radius: 2px;
+}
+QSlider::add-page:vertical { background: rgba(21, 244, 238, 0.55); border-radius: 2px; }
+QSlider::handle:vertical {
+    background: #15F4EE;
+    height: 10px; width: 18px;
+    margin: 0 -8px;
+    border-radius: 3px;
+}
+QSlider::handle:vertical:hover { background: #ffffff; }
+QPushButton:disabled { color: rgba(21, 244, 238, 0.35); border-color: rgba(21, 244, 238, 0.25); }

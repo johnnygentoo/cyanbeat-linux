@@ -3,10 +3,17 @@
 
 #include <QObject>
 #include <QString>
+#include <QVector>
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <mutex>
 
 typedef struct _GstElement GstElement;
 typedef struct _GstBus GstBus;
 typedef struct _GstMessage GstMessage;
+typedef struct _GstPad GstPad;
+typedef struct _GstPadProbeInfo GstPadProbeInfo;
 
 // Audio playback on GStreamer playbin3. Bus messages arrive on GStreamer's
 // streaming threads and are marshalled onto the Qt thread, so this works with
@@ -39,6 +46,21 @@ public:
     void setVolume(double v);
     double volume() const { return m_volume; }
 
+    // ---- audio filters: EQ → limiter → (tap) → output
+    bool hasEqualizer() const { return m_eq != nullptr; }
+    // One peaking band per entry; gains in dB. Applied live, no gap.
+    void setEqualizer(const QVector<double> &freqsHz, const QVector<double> &bandwidthsHz,
+                      const QVector<double> &gainsDb);
+    // A soft limiter after the EQ so boosts can't clip; off = bit-transparent.
+    void setLimiter(bool on);
+
+    // The audio exactly as it's heard (after EQ + limiter): interleaved float with
+    // its rate, channel count and stream time (ms, comparable to positionMs()).
+    // It arrives AHEAD of playback, on a GStreamer thread — queue it and release
+    // it against positionMs(). A call with pcm == nullptr means "flushed (seek)".
+    using PcmTap = std::function<void(const float *pcm, int frames, int rate, int channels, qint64 ptsMs)>;
+    void setPcmTap(PcmTap tap);
+
 Q_SIGNALS:
     void stateChanged(GstEngine::State state);
     void durationChanged(qint64 ms);
@@ -50,7 +72,14 @@ private:
     void handleMessage(GstMessage *msg);
     void setState(State s);
 
+    void buildFilters();
+    static int onTapProbe(GstPad *pad, GstPadProbeInfo *info, void *self);
+
     GstElement *m_pipeline = nullptr;
+    GstElement *m_eq = nullptr;       // equalizer-nbands (owned by the filter bin)
+    GstElement *m_limiter = nullptr;  // rglimiter
+    std::mutex m_tapMutex;
+    std::shared_ptr<PcmTap> m_tap;
     State m_state = State::Stopped;
     double m_volume = 0.8;
     QString m_initError;

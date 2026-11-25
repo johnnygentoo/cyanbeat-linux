@@ -46,6 +46,13 @@ void LcdDisplay::setPosition(qint64 positionMs, qint64 durationMs)
     update();
 }
 
+void LcdDisplay::setBars(const QVector<float> &bars)
+{
+    m_bars = bars;
+    if (m_hasTrack)
+        update();
+}
+
 void LcdDisplay::setStatusText(const QString &text)
 {
     m_status = text;
@@ -116,6 +123,24 @@ void LcdDisplay::paintEvent(QPaintEvent *)
         p.setPen(m_status.isEmpty() ? Theme::Cyan : dim);
         p.drawText(QRectF(x + 8, 0, textW + 4, height()), Qt::AlignVCenter | Qt::AlignLeft, name);
         return;
+    }
+
+    // Spectrum, very faint, behind everything else.
+    if (!m_bars.isEmpty()) {
+        p.save();
+        p.setClipPath(shape);
+        QColor bar = Theme::Cyan;
+        bar.setAlpha(38);
+        const double area = width() - 2 * kPad;
+        const double slot = area / m_bars.size();
+        const double maxH = height() - 10.0;
+        for (int i = 0; i < m_bars.size(); ++i) {
+            const double h = m_bars[i] * maxH;
+            if (h < 0.5)
+                continue;
+            p.fillRect(QRectF(kPad + i * slot + 0.5, height() - 4 - h, qMax(1.0, slot - 1.5), h), bar);
+        }
+        p.restore();
     }
 
     // Two text lines.

@@ -4,8 +4,7 @@ A local music player in the JohnnyCyan look: a library, a column browser and a
 now-playing display, in the spirit of mid-2000s desktop jukeboxes, kept light.
 Desktop sibling of the CyanBeat Android app, from JohnnyGentoo Studios.
 
-Planned: two-way phone sync over ADB (USB or wireless) or MTP, and a cava
-visualizer.
+Planned: two-way phone sync over ADB (USB or wireless) or MTP.
 
 ## Status
 
@@ -22,6 +21,14 @@ Early (v0.1.0). Working now:
   Date Added (when the file landed on disk), Last Played. Right-click the column
   header to show/hide columns.
 - Drag songs out of the list into a file manager.
+- Equalizer (Window › Equalizer, Ctrl+E): the Android app's 8 bands and presets,
+  your own presets, a live response curve. Boosts are real; a limiter switches on
+  only while a band is boosted, so flat is untouched audio.
+- Visualizer (View › Show Visualizer, Ctrl+T, and faintly behind the now-playing
+  display): runs **your cava** on CyanBeat's own audio (after the EQ, in step with
+  what you hear), using the smoothing/eq/colours from `~/.config/cava/config`. It's
+  started as plain `cava`, so a waybar script that does `pkill -f "cava -p"` won't
+  touch it. Without cava there's a built-in analyzer.
 - Find Duplicates (Tools menu): identical files, the same YouTube video saved twice
   (`[id]` and `-id` names), and the same song under different names (artist/title in
   any order, track numbers and "(Official Video)" ignored, lengths must match). The
@@ -44,7 +51,7 @@ Early (v0.1.0). Working now:
 1. ~~Skeleton, theme, playback, library, browser~~
 2. ~~SQLite collection: playlists, play counts, ratings, smart lists~~
 3. ~~MPRIS + `cyanbeat-remote` (cmus-remote-compatible flags) for waybar~~
-4. Visualizer (cava) and a 10-band EQ with the Android app's presets
+4. ~~Visualizer (cava) and EQ with the Android app's presets~~
 5. Phone sync over ADB: flagged folders, merged both ways (new files on either side
    are copied to the other; nothing is deleted except in mirror mode, which asks first)
 6. MTP fallback, gapless, ReplayGain, tray icon
@@ -88,6 +95,8 @@ cyanbeat-remote --or-cmus -u   # CyanBeat if it's running, else cmus
 | Ctrl+L | Go to the current song |
 | Ctrl+F | Search |
 | Ctrl+B | Show/hide the column browser |
+| Ctrl+T | Visualizer (Esc or double-click to go back) |
+| Ctrl+E | Equalizer |
 | Ctrl+O | Add a folder |
 | Ctrl+N / Ctrl+Shift+N | New playlist / from selection |
 | Delete | Remove selected songs from the playlist |

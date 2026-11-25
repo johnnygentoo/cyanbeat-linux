@@ -10,6 +10,9 @@
 #include <QCommandLineParser>
 #include <QEventLoop>
 #include <cstdio>
+#ifdef Q_OS_UNIX
+#include <csignal>
+#endif
 
 #ifdef CYANBEAT_HAVE_MPRIS
 #include "platform/Mpris.h"
@@ -21,6 +24,11 @@
 
 int main(int argc, char **argv)
 {
+#ifdef Q_OS_UNIX
+    // The visualizer writes to cava through a FIFO; if cava goes away mid-write we
+    // want EPIPE, not a dead music player.
+    std::signal(SIGPIPE, SIG_IGN);
+#endif
     QApplication app(argc, argv);
     QApplication::setOrganizationName(QStringLiteral("JohnnyGentoo Studios"));
     QApplication::setApplicationName(QStringLiteral("CyanBeat"));
