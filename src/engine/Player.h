@@ -2,6 +2,7 @@
 #pragma once
 
 #include "engine/GstEngine.h"
+#include "library/ReplayGain.h"
 
 #include <QObject>
 #include <QStringList>
@@ -43,6 +44,8 @@ public:
     void setRepeat(Repeat r);
     void cycleRepeat();
     void setVolume(double v);  // 0..1, perceptual
+    void setReplayGain(ReplayGain::Mode mode, double preampDb = 0.0);
+    ReplayGain::Mode replayGainMode() const { return m_rgMode; }
 
     GstEngine::State state() const { return m_engine->state(); }
     bool shuffle() const { return m_shuffle; }
@@ -67,6 +70,10 @@ Q_SIGNALS:
 
 private:
     void playQueueIndex(int pos);
+    int nextPosition() const;  // what plays when the current song ends, -1 = stop
+    void updatePreload();      // tell the engine (gapless)
+    void applyReplayGain();
+    void onGaplessAdvanced();
     void onEndOfStream();
     void onError(const QString &msg);
 
@@ -82,4 +89,7 @@ private:
     int m_errorStreak = 0;
     bool m_playCounted = false;
     std::function<void()> m_startFallback;
+    int m_preloadPos = -1;
+    ReplayGain::Mode m_rgMode = ReplayGain::Mode::Off;
+    double m_rgPreamp = 0.0;
 };

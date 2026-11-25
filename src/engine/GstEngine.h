@@ -54,6 +54,23 @@ public:
     // A soft limiter after the EQ so boosts can't clip; off = bit-transparent.
     void setLimiter(bool on);
 
+    // ReplayGain (or any fixed gain) for the current song, in dB.
+    void setReplayGainDb(double db);
+
+    // The Android app's FX: speed and pitch independently (0.5–2.0; equal values =
+    // tape-style slowdown/speedup), reverb 0..1, bass boost in dB.
+    struct Effects {
+        double speed = 1.0, pitch = 1.0, reverb = 0.0, bassDb = 0.0;
+    };
+    bool hasSpeed() const { return m_tempo != nullptr; }   // scaletempo
+    bool hasPitch() const { return m_pitch != nullptr; }   // gst-plugins-soundtouch
+    bool hasReverb() const { return m_reverb != nullptr; } // freeverb
+    void setEffects(const Effects &fx);
+
+    // Gapless: the file to start the moment the current one ends (inside the same
+    // stream, no gap). Empty = stop at the end. Emits gaplessAdvanced() when it starts.
+    void setNextFile(const QString &path);
+
     // The audio exactly as it's heard (after EQ + limiter): interleaved float with
     // its rate, channel count and stream time (ms, comparable to positionMs()).
     // It arrives AHEAD of playback, on a GStreamer thread — queue it and release
@@ -65,6 +82,7 @@ Q_SIGNALS:
     void stateChanged(GstEngine::State state);
     void durationChanged(qint64 ms);
     void endOfStream();
+    void gaplessAdvanced();
     void error(const QString &message);
 
 private:
@@ -73,11 +91,26 @@ private:
     void setState(State s);
 
     void buildFilters();
+    void updateLimiter();
+    void onAboutToFinish(GstElement *pipeline);
     static int onTapProbe(GstPad *pad, GstPadProbeInfo *info, void *self);
 
     GstElement *m_pipeline = nullptr;
     GstElement *m_eq = nullptr;       // equalizer-nbands (owned by the filter bin)
     GstElement *m_limiter = nullptr;  // rglimiter
+    GstElement *m_rgVolume = nullptr;
+    GstElement *m_bass = nullptr;
+    GstElement *m_pitch = nullptr;
+    GstElement *m_tempo = nullptr;
+    GstElement *m_reverb = nullptr;
+    bool m_limitEq = false;
+    double m_rgDb = 0.0;
+    Effects m_fx;
+    double m_rate = 1.0;
+    bool m_rateStale = false;
+    std::mutex m_nextMutex;
+    QByteArray m_nextUri;
+    std::atomic_bool m_gaplessPending{false};
     std::mutex m_tapMutex;
     std::shared_ptr<PcmTap> m_tap;
     State m_state = State::Stopped;

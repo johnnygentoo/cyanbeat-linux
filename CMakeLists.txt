@@ -36,6 +36,7 @@ add_library(cyanbeat_core STATIC
   src/library/Scanner.cpp
   src/library/Collection.cpp
   src/library/Duplicates.cpp
+  src/library/ReplayGain.cpp
   src/library/Library.cpp
   src/library/TrackModel.cpp
   src/ui/Theme.cpp
@@ -91,6 +92,9 @@ if(BUILD_TESTING)
   qt_add_executable(sourcelist_test tests/sourcelist_test.cpp)
   target_link_libraries(sourcelist_test PRIVATE cyanbeat_core)
   add_test(NAME sourcelist_test COMMAND sourcelist_test)
+  qt_add_executable(playback_test tests/playback_test.cpp)
+  target_link_libraries(playback_test PRIVATE cyanbeat_core)
+  add_test(NAME playback_test COMMAND playback_test)
   # Needs an adb device to scribble on (an emulator): CYANBEAT_TEST_ADB_SERIAL=emulator-5554
   qt_add_executable(sync_emulator_test tests/sync_emulator_test.cpp)
   target_link_libraries(sync_emulator_test PRIVATE cyanbeat_core)

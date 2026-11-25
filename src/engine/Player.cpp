@@ -26,6 +26,7 @@ Player::Player(Library *library, QObject *parent)
     });
 
     connect(m_engine, &GstEngine::endOfStream, this, &Player::onEndOfStream);
+    connect(m_engine, &GstEngine::gaplessAdvanced, this, &Player::onGaplessAdvanced);
     connect(m_engine, &GstEngine::error, this, &Player::onError);
     connect(m_engine, &GstEngine::stateChanged, this, [this](GstEngine::State s) {
         if (s == GstEngine::State::Playing)
@@ -57,6 +58,7 @@ Player::Player(Library *library, QObject *parent)
         m_queuePaths.clear();
         if (currentIndex() != before)
             Q_EMIT currentChanged(currentIndex());
+        updatePreload();
     });
 }
 
@@ -115,9 +117,61 @@ void Player::playQueueIndex(int pos)
     m_playCounted = false;
     const Track &t = m_library->tracks()[m_queue[pos]];
     m_currentPath = t.path;
+    applyReplayGain();
     m_engine->playFile(t.path);
+    updatePreload();
     Q_EMIT currentChanged(m_queue[pos]);
     Q_EMIT positionTick(0, t.durationMs);
+}
+
+int Player::nextPosition() const
+{
+    if (m_queue.isEmpty() || m_queuePos < 0)
+        return -1;
+    if (m_repeat == Repeat::One)
+        return m_queuePos;
+    if (m_queuePos + 1 < m_queue.size())
+        return m_queuePos + 1;
+    return m_repeat == Repeat::All ? 0 : -1;
+}
+
+void Player::updatePreload()
+{
+    m_preloadPos = nextPosition();
+    const Track *t = m_preloadPos >= 0 ? &m_library->tracks()[m_queue[m_preloadPos]] : nullptr;
+    m_engine->setNextFile(t ? t->path : QString());
+}
+
+void Player::onGaplessAdvanced()
+{
+    // The engine already started the preloaded song; catch the queue up.
+    if (m_preloadPos < 0 || m_preloadPos >= m_queue.size())
+        return;
+    if (!m_playCounted && currentIndex() >= 0)
+        m_library->recordPlay(currentIndex());
+    m_errorStreak = 0;
+    m_queuePos = m_preloadPos;
+    m_playCounted = false;
+    m_currentPath = m_library->tracks()[m_queue[m_queuePos]].path;
+    applyReplayGain();
+    updatePreload();
+    Q_EMIT currentChanged(currentIndex());
+    Q_EMIT positionTick(0, durationMs());
+}
+
+void Player::applyReplayGain()
+{
+    const Track *t = currentTrack();
+    m_engine->setReplayGainDb(t && m_rgMode != ReplayGain::Mode::Off
+                                  ? ReplayGain::pick(ReplayGain::read(t->path), m_rgMode, m_rgPreamp)
+                                  : 0.0);
+}
+
+void Player::setReplayGain(ReplayGain::Mode mode, double preampDb)
+{
+    m_rgMode = mode;
+    m_rgPreamp = preampDb;
+    applyReplayGain();
 }
 
 void Player::play()
@@ -226,6 +280,7 @@ void Player::setShuffle(bool on)
     // Reorder what's left of the queue so the switch takes effect immediately.
     if (on && m_queuePos >= 0 && m_queuePos + 1 < m_queue.size())
         std::shuffle(m_queue.begin() + m_queuePos + 1, m_queue.end(), *QRandomGenerator::global());
+    updatePreload();
     Q_EMIT shuffleChanged(on);
 }
 
@@ -234,6 +289,7 @@ void Player::setRepeat(Repeat r)
     if (m_repeat == r)
         return;
     m_repeat = r;
+    updatePreload();
     Q_EMIT repeatChanged(r);
 }
 
