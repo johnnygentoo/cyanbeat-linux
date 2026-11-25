@@ -1,52 +1,73 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "library/Collection.h"
 #include "library/Track.h"
 
 #include <QFutureWatcher>
+#include <QHash>
 #include <QObject>
 #include <QStringList>
 #include <atomic>
 #include <memory>
 
-// The music collection: watched folders + the tracks found in them.
-// Kept in memory, with a binary cache so launch is instant and rescans only
-// re-read changed files. The SQLite collection (play counts, ratings,
-// playlists) replaces the cache later.
+// The music collection: watched folders, the tracks found in them (kept in
+// memory for speed) and their SQLite backing (stats, playlists). Launch shows
+// the stored collection at once; rescans only re-read files whose size or
+// mtime changed.
 class Library : public QObject {
     Q_OBJECT
 public:
-    explicit Library(QObject *parent = nullptr);
+    // `dbPath` empty = the default under the app data dir.
+    explicit Library(const QString &dbPath = QString(), QObject *parent = nullptr);
     ~Library() override;
 
+    void start();
+
     const TrackList &tracks() const { return m_tracks; }
+    int indexOfPath(const QString &path) const { return m_byPath.value(path, -1); }
     QStringList folders() const { return m_folders; }
     bool isScanning() const { return m_watcher.isRunning(); }
-
-    // Shows the cached library immediately, then rescans in the background.
-    void start();
 
     void addFolder(const QString &folder);
     void removeFolder(const QString &folder);
     void rescan();
 
-    qint64 totalDurationMs() const;
-    qint64 totalBytes() const;
+    // Stats. Both persist immediately and emit trackUpdated.
+    void recordPlay(int index);
+    void setRating(int index, int stars);  // 0..5
+
+    // Playlists (entries are library indices; missing files are skipped).
+    QVector<Playlist> playlists() { return m_db.playlists(); }
+    qint64 createPlaylist(const QString &name, const QVector<int> &tracks = {});
+    void renamePlaylist(qint64 id, const QString &name);
+    void deletePlaylist(qint64 id);
+    QVector<int> playlistTracks(qint64 id);
+    void appendToPlaylist(qint64 id, const QVector<int> &tracks);
+    // Replace the order of a playlist's *present* entries, keeping missing ones in place.
+    void reorderPlaylist(qint64 id, const QVector<int> &presentInOrder);
+    // Remove entries by their position among the playlist's present entries.
+    void removeFromPlaylist(qint64 id, QVector<int> presentPositions);
 
 Q_SIGNALS:
     void scanStarted();
     void tracksAboutToChange();  // last chance to read old indices
     void tracksChanged();
     void scanFinished();         // always, even when nothing changed
+    void trackUpdated(int index);
+    void playlistsChanged();
+    void playlistContentsChanged(qint64 id);
 
 private:
     void saveFolders() const;
-    bool loadCache();
-    void saveCache() const;
     void setTracks(TrackList tracks);
+    void applyScan(TrackList scanned);
 
+    QString m_dbPath;
+    Collection m_db;
     QStringList m_folders;
     TrackList m_tracks;
+    QHash<QString, int> m_byPath;
     QFutureWatcher<TrackList> m_watcher;
     std::shared_ptr<std::atomic_bool> m_cancel;
     bool m_rescanQueued = false;

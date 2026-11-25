@@ -15,8 +15,10 @@ class BrowserPanes : public QWidget {
 public:
     explicit BrowserPanes(QWidget *parent = nullptr);
 
-    // `base` = library indices still in play (after the search filter).
+    // `base` = library indices still in play (after the search filter); may
+    // repeat (a playlist can hold a song twice).
     void setSource(const TrackList *tracks, QVector<int> base);
+    // Positions into `base` that pass the pane selections, in base order.
     const QVector<int> &filtered() const { return m_filtered; }
 
     // Reset all three panes to "All".

@@ -8,6 +8,7 @@
 #include <QSplitter>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <numeric>
 
 namespace {
 constexpr int KeyRole = Qt::UserRole + 1;
@@ -91,14 +92,15 @@ void BrowserPanes::clearSelection()
 
 void BrowserPanes::rebuild(int fromLevel)
 {
-    QVector<int> pool = m_base;
+    QVector<int> pool(m_base.size());
+    std::iota(pool.begin(), pool.end(), 0);  // positions into m_base
     for (int level = 0; level < Levels; ++level) {
         if (level >= fromLevel && m_tracks) {
             QStringList keys;
             {
                 QSet<QString> seen;
                 for (int i : pool) {
-                    const QString k = keyOf(level, (*m_tracks)[i]);
+                    const QString k = keyOf(level, (*m_tracks)[m_base[i]]);
                     if (!seen.contains(k)) {
                         seen.insert(k);
                         keys << k;
@@ -138,7 +140,7 @@ void BrowserPanes::rebuild(int fromLevel)
             QVector<int> next;
             next.reserve(pool.size());
             for (int i : pool)
-                if (keyOf(level, (*m_tracks)[i]) == *m_sel[level])
+                if (keyOf(level, (*m_tracks)[m_base[i]]) == *m_sel[level])
                     next << i;
             pool = std::move(next);
         }

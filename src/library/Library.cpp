@@ -3,17 +3,15 @@
 
 #include "library/Scanner.h"
 
-#include <QDataStream>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
-#include <QFileInfo>
-#include <QSaveFile>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QtConcurrent>
 #include <algorithm>
 
-Library::Library(QObject *parent) : QObject(parent)
+Library::Library(const QString &dbPath, QObject *parent) : QObject(parent), m_dbPath(dbPath)
 {
     QSettings s;
     if (s.contains(QStringLiteral("library/folders"))) {
@@ -34,8 +32,7 @@ Library::Library(QObject *parent) : QObject(parent)
         }
         if (m_cancel && m_cancel->load())
             return;
-        setTracks(m_watcher.result());
-        saveCache();
+        applyScan(m_watcher.result());
         Q_EMIT scanFinished();
     });
 }
@@ -49,7 +46,16 @@ Library::~Library()
 
 void Library::start()
 {
-    loadCache();
+    QString path = m_dbPath;
+    if (path.isEmpty()) {
+        path = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/collection.db");
+        // Phase-0 binary cache, superseded by the database.
+        QFile::remove(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/library.bin"));
+    }
+    if (!m_db.open(path))
+        qWarning("CyanBeat: cannot open collection %s: %s", qPrintable(path), qPrintable(m_db.lastError()));
+    setTracks(m_db.loadTracks());
+    Q_EMIT playlistsChanged();
     rescan();
 }
 
@@ -67,67 +73,45 @@ void Library::setTracks(TrackList tracks)
             return a.trackNo < b.trackNo;
         return QString::localeAwareCompare(a.title, b.title) < 0;
     });
-    // A rescan that found nothing new must not reset the view under the user.
-    const bool same = tracks.size() == m_tracks.size()
-        && std::equal(tracks.cbegin(), tracks.cend(), m_tracks.cbegin(), [](const Track &a, const Track &b) {
-               return a.path == b.path && a.sizeBytes == b.sizeBytes && a.mtime == b.mtime;
-           });
-    if (same && !m_tracks.isEmpty())
-        return;
     Q_EMIT tracksAboutToChange();
     m_tracks = std::move(tracks);
+    m_byPath.clear();
+    m_byPath.reserve(m_tracks.size());
+    for (int i = 0; i < m_tracks.size(); ++i)
+        m_byPath.insert(m_tracks[i].path, i);
     Q_EMIT tracksChanged();
 }
 
-namespace {
-constexpr quint32 kCacheMagic = 0x43424c31;  // "CBL1"
-constexpr quint32 kCacheVersion = 1;
-
-QString cachePath()
+void Library::applyScan(TrackList scanned)
 {
-    return QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/library.bin");
-}
-}
-
-bool Library::loadCache()
-{
-    QFile f(cachePath());
-    if (!f.open(QIODevice::ReadOnly))
-        return false;
-    QDataStream in(&f);
-    quint32 magic = 0, version = 0;
-    QStringList folders;
-    qint64 count = 0;
-    in >> magic >> version >> folders >> count;
-    if (magic != kCacheMagic || version != kCacheVersion || folders != m_folders || count < 0 || count > 10'000'000)
-        return false;
-    TrackList tracks;
-    tracks.reserve(count);
-    for (qint64 i = 0; i < count && in.status() == QDataStream::Ok; ++i) {
-        Track t;
-        in >> t.path >> t.title >> t.artist >> t.album >> t.albumArtist >> t.genre >> t.year >> t.trackNo
-           >> t.discNo >> t.durationMs >> t.sizeBytes >> t.mtime;
-        tracks.push_back(std::move(t));
+    // Diff against what we have: only new/changed rows hit the database, and an
+    // unchanged rescan leaves the view alone.
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    TrackList changed;
+    QSet<QString> seen;
+    seen.reserve(scanned.size());
+    for (Track &t : scanned) {
+        seen.insert(t.path);
+        const int old = m_byPath.value(t.path, -1);
+        if (old < 0) {
+            if (t.addedAt <= 0 || t.addedAt > now)
+                t.addedAt = now;
+            changed.push_back(t);
+        } else {
+            const Track &o = m_tracks[old];
+            if (o.sizeBytes != t.sizeBytes || o.mtime != t.mtime)
+                changed.push_back(t);
+        }
     }
-    if (in.status() != QDataStream::Ok)
-        return false;
-    setTracks(std::move(tracks));
-    return true;
-}
+    QStringList removed;
+    for (const Track &t : std::as_const(m_tracks))
+        if (!seen.contains(t.path))
+            removed << t.path;
 
-void Library::saveCache() const
-{
-    const QString path = cachePath();
-    QDir().mkpath(QFileInfo(path).absolutePath());
-    QSaveFile f(path);
-    if (!f.open(QIODevice::WriteOnly))
+    if (changed.isEmpty() && removed.isEmpty())
         return;
-    QDataStream out(&f);
-    out << kCacheMagic << kCacheVersion << m_folders << qint64(m_tracks.size());
-    for (const Track &t : m_tracks)
-        out << t.path << t.title << t.artist << t.album << t.albumArtist << t.genre << t.year << t.trackNo
-            << t.discNo << t.durationMs << t.sizeBytes << t.mtime;
-    f.commit();
+    m_db.saveTracks(changed, removed);
+    setTracks(std::move(scanned));
 }
 
 void Library::addFolder(const QString &folder)
@@ -159,7 +143,7 @@ void Library::rescan()
     auto cancel = m_cancel;
     auto known = std::make_shared<QHash<QString, Track>>();
     known->reserve(m_tracks.size());
-    for (const Track &t : m_tracks)
+    for (const Track &t : std::as_const(m_tracks))
         known->insert(t.path, t);
     Q_EMIT scanStarted();
     m_watcher.setFuture(QtConcurrent::run([folders, cancel, known] {
@@ -167,23 +151,109 @@ void Library::rescan()
     }));
 }
 
-qint64 Library::totalDurationMs() const
-{
-    qint64 sum = 0;
-    for (const Track &t : m_tracks)
-        sum += t.durationMs;
-    return sum;
-}
-
-qint64 Library::totalBytes() const
-{
-    qint64 sum = 0;
-    for (const Track &t : m_tracks)
-        sum += t.sizeBytes;
-    return sum;
-}
-
 void Library::saveFolders() const
 {
     QSettings().setValue(QStringLiteral("library/folders"), m_folders);
+}
+
+// ---------------------------------------------------------------- stats
+
+void Library::recordPlay(int index)
+{
+    if (index < 0 || index >= m_tracks.size())
+        return;
+    Track &t = m_tracks[index];
+    ++t.playCount;
+    t.lastPlayed = QDateTime::currentSecsSinceEpoch();
+    m_db.saveStats(t);
+    Q_EMIT trackUpdated(index);
+}
+
+void Library::setRating(int index, int stars)
+{
+    if (index < 0 || index >= m_tracks.size())
+        return;
+    Track &t = m_tracks[index];
+    t.rating = qBound(0, stars, 5);
+    m_db.saveStats(t);
+    Q_EMIT trackUpdated(index);
+}
+
+// ---------------------------------------------------------------- playlists
+
+qint64 Library::createPlaylist(const QString &name, const QVector<int> &tracks)
+{
+    const qint64 id = m_db.createPlaylist(name);
+    if (id && !tracks.isEmpty())
+        appendToPlaylist(id, tracks);
+    Q_EMIT playlistsChanged();
+    return id;
+}
+
+void Library::renamePlaylist(qint64 id, const QString &name)
+{
+    m_db.renamePlaylist(id, name);
+    Q_EMIT playlistsChanged();
+}
+
+void Library::deletePlaylist(qint64 id)
+{
+    m_db.deletePlaylist(id);
+    Q_EMIT playlistsChanged();
+}
+
+QVector<int> Library::playlistTracks(qint64 id)
+{
+    QVector<int> out;
+    for (const QString &p : m_db.playlistItems(id)) {
+        const int i = indexOfPath(p);
+        if (i >= 0)
+            out << i;
+    }
+    return out;
+}
+
+void Library::appendToPlaylist(qint64 id, const QVector<int> &tracks)
+{
+    QStringList paths;
+    for (int i : tracks)
+        if (i >= 0 && i < m_tracks.size())
+            paths << m_tracks[i].path;
+    m_db.appendToPlaylist(id, paths);
+    Q_EMIT playlistContentsChanged(id);
+}
+
+void Library::reorderPlaylist(qint64 id, const QVector<int> &presentInOrder)
+{
+    // Present entries fill the slots that present entries occupied; missing
+    // entries (file not on disk right now) stay where they were.
+    QStringList all = m_db.playlistItems(id);
+    int k = 0;
+    for (QString &p : all) {
+        if (indexOfPath(p) < 0)
+            continue;
+        if (k < presentInOrder.size())
+            p = m_tracks[presentInOrder[k++]].path;
+    }
+    m_db.setPlaylistItems(id, all);
+    Q_EMIT playlistContentsChanged(id);
+}
+
+void Library::removeFromPlaylist(qint64 id, QVector<int> presentPositions)
+{
+    std::sort(presentPositions.begin(), presentPositions.end());
+    const QStringList all = m_db.playlistItems(id);
+    QStringList kept;
+    int present = 0;
+    for (const QString &p : all) {
+        if (indexOfPath(p) >= 0) {
+            const bool drop = std::binary_search(presentPositions.cbegin(), presentPositions.cend(), present);
+            ++present;
+            if (drop)
+                continue;
+        }
+        kept << p;
+    }
+    m_db.setPlaylistItems(id, kept);
+    Q_EMIT playlistContentsChanged(id);
 }

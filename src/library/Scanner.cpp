@@ -73,6 +73,12 @@ Track readTrack(const QString &path)
     t.path = fi.absoluteFilePath();
     t.sizeBytes = fi.size();
     t.mtime = fi.lastModified().toSecsSinceEpoch();
+    // "Date Added" for a file we've never seen = when it landed on this disk
+    // (birth time, else inode change time), not the moment of the first scan.
+    QDateTime born = fi.birthTime();
+    if (!born.isValid())
+        born = fi.metadataChangeTime();
+    t.addedAt = born.isValid() ? born.toSecsSinceEpoch() : 0;
 
 #ifdef Q_OS_WIN
     TagLib::FileRef ref(reinterpret_cast<const wchar_t *>(t.path.utf16()), true, TagLib::AudioProperties::Fast);
@@ -122,6 +128,7 @@ TrackList scanFolders(const QStringList &folders, const std::atomic_bool *cancel
             if (canon.isEmpty() || seen.contains(canon))
                 continue;
             seen.insert(canon);
+            const Track *prev = nullptr;
             if (known) {
                 const auto hit = known->constFind(canon);
                 if (hit != known->cend()) {
@@ -130,9 +137,17 @@ TrackList scanFolders(const QStringList &folders, const std::atomic_bool *cancel
                         out.push_back(*hit);
                         continue;
                     }
+                    prev = &*hit;
                 }
             }
-            out.push_back(readTrack(canon));
+            Track t = readTrack(canon);
+            if (prev) {  // re-tagged file: new tags, same history
+                t.playCount = prev->playCount;
+                t.lastPlayed = prev->lastPlayed;
+                t.rating = prev->rating;
+                t.addedAt = prev->addedAt;
+            }
+            out.push_back(std::move(t));
         }
     }
     return out;

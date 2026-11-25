@@ -11,7 +11,7 @@ endif()
 
 include(GNUInstallDirs)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Concurrent Svg)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Concurrent Svg Sql)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0 gstreamer-audio-1.0)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
@@ -21,11 +21,14 @@ add_library(cyanbeat_core STATIC
   src/engine/GstEngine.cpp
   src/library/Track.cpp
   src/library/Scanner.cpp
+  src/library/Collection.cpp
   src/library/Library.cpp
   src/library/TrackModel.cpp
   src/ui/Theme.cpp
   src/ui/LcdDisplay.cpp
   src/ui/BrowserPanes.cpp
+  src/ui/RatingDelegate.cpp
+  src/ui/SourceList.cpp
   src/ui/MainWindow.cpp
 )
 target_include_directories(cyanbeat_core PUBLIC src)
@@ -33,7 +36,7 @@ target_include_directories(cyanbeat_core PUBLIC src)
 target_compile_definitions(cyanbeat_core PUBLIC QT_NO_KEYWORDS
   CYANBEAT_VERSION="${PROJECT_VERSION}")
 target_link_libraries(cyanbeat_core PUBLIC
-  Qt6::Widgets Qt6::Concurrent Qt6::Svg PkgConfig::GST PkgConfig::TAGLIB)
+  Qt6::Widgets Qt6::Concurrent Qt6::Svg Qt6::Sql PkgConfig::GST PkgConfig::TAGLIB)
 
 # Resources go on the executable: a static lib's rcc object gets dropped by the linker.
 qt_add_executable(cyanbeat src/main.cpp data/cyanbeat.qrc)
@@ -46,6 +49,9 @@ if(BUILD_TESTING)
   add_test(NAME engine_smoke COMMAND engine_smoke)
   # Needs a real audio file: CYANBEAT_TEST_FILE=/path/song.mp3 ctest. Skips without one.
   set_tests_properties(engine_smoke PROPERTIES SKIP_RETURN_CODE 77)
+  qt_add_executable(collection_test tests/collection_test.cpp)
+  target_link_libraries(collection_test PRIVATE cyanbeat_core)
+  add_test(NAME collection_test COMMAND collection_test)
 endif()
 
 install(TARGETS cyanbeat RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

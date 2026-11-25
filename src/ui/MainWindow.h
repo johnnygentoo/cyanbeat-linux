@@ -2,6 +2,7 @@
 #pragma once
 
 #include "engine/GstEngine.h"
+#include "ui/SourceList.h"
 
 #include <QMainWindow>
 #include <QStringList>
@@ -19,7 +20,6 @@ class QSplitter;
 class QTableView;
 class QTimer;
 class QToolButton;
-class QTreeWidget;
 class TrackModel;
 
 class MainWindow : public QMainWindow {
@@ -41,11 +41,24 @@ private:
     QWidget *buildTopBar();
     QWidget *buildSourceList();
     QWidget *buildStatusStrip();
+    void setupTable();
 
-    void refilter();          // search → browser → table
+    void onSourceChanged(const Source &s);
+    void loadSourceRows();    // m_sourceRows/m_sourcePositions for the current source
+    void refilter();          // source → search → browser → table
     void onBrowserFiltered();
+    void updateReorderable();
+    void onReorder(QVector<int> rows, int targetRow);
+    void showTrackMenu(const QPoint &pos);
+    void showHeaderMenu(const QPoint &pos);
+    QVector<int> selectedTracks() const;       // library indices, view order
+    QVector<int> selectedPositions() const;    // playlist positions of the selection
+    void newPlaylist(const QVector<int> &tracks);
+    void removeSelectionFromPlaylist();
+    void confirmDeletePlaylist(qint64 id);
     void onLibraryChanged();
     void updateSummary();
+    void maybeSnapshot();
 
     // Playback / queue.
     void playFromRow(int proxyRow);
@@ -72,7 +85,7 @@ private:
     QToolButton *m_playBtn = nullptr;
     QSlider *m_volume = nullptr;
     QLineEdit *m_search = nullptr;
-    QTreeWidget *m_sources = nullptr;
+    SourceList *m_sources = nullptr;
     QSplitter *m_mainSplit = nullptr;
     QSplitter *m_contentSplit = nullptr;
     BrowserPanes *m_browser = nullptr;
@@ -94,5 +107,13 @@ private:
     bool m_shuffle = false;
     Repeat m_repeat = Repeat::Off;
     int m_errorStreak = 0;
+    bool m_playCounted = false;
+
+    Source m_source;
+    QVector<int> m_sourceRows;       // library indices for the current source
+    QVector<int> m_sourcePositions;  // per row: playlist position / smart-list rank (-1 in Library)
+    QVector<int> m_basePositions;    // after search: positions into m_sourceRows
+    int m_librarySortColumn = 4;     // TrackModel::ColArtist
+    Qt::SortOrder m_librarySortOrder = Qt::AscendingOrder;
     QString m_snapshotPath;
 };

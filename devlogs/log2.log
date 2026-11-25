@@ -1,0 +1,68 @@
+================================================================================
+CyanBeat Linux — Dev Log #2
+JohnnyGentoo Studios
+Date: 2026-11-25
+Phase: 1 — SQLite collection: playlists, smart lists, ratings, play counts
+Branch: main
+Author: Claude
+================================================================================
+
+COLLECTION  (src/library/Collection.*, Qt Sql / QSQLITE)
+  - ~/.local/share/JohnnyGentoo Studios/CyanBeat/collection.db, WAL +
+    synchronous=NORMAL (no fsync per play count on the spinning disk).
+  - tracks(path PK, tags, duration, size, mtime, play_count, last_played, rating,
+    added_at); playlists(id, name); playlist_items(playlist_id, pos, path) with
+    ON DELETE CASCADE. Schema version in PRAGMA user_version.
+  - Replaces the phase-0 library.bin cache (deleted on first run).
+  - Rescans diff against memory: only new/changed rows are written, removed paths
+    deleted; an unchanged rescan emits nothing (view isn't reset).
+
+PLAYLISTS
+  - Entries are stored BY PATH. A song whose file is gone (moved, mid-sync) is
+    hidden but keeps its slot; reorder/remove only touch the entries you can see,
+    so it reappears in the same place when the file comes back. This matters for
+    phone sync later.
+  - Sidebar (ui/SourceList): LIBRARY › Music, DEVICES, PLAYLISTS › 3 smart lists +
+    user playlists. Drop songs on a playlist = append; on empty space / the header =
+    new playlist. Inline rename (F2 / right-click), Delete with confirmation.
+  - Table: drag rows within a playlist to reorder; only enabled when the playlist
+    is shown unfiltered in # order (otherwise the drop position is ambiguous).
+    Delete/Backspace removes from the playlist. Drags also carry file URLs, so
+    songs can be dropped into a file manager.
+
+SMART LISTS
+  - Recently Added: last 30 days, never fewer than the newest 25.
+  - Recently Played: last 100 by last_played.
+  - Top 25 Most Played.
+
+STATS
+  - Play counts at min(half the song, 4 min) of playback, or at EOS for songs that
+    end between ticks. Last Played alongside.
+  - Ratings: 0–5 stars, click in the Rating column (click the last lit star again
+    to step down), or right-click › Rating for a selection.
+  - Date Added = the file's birth time (statx), else ctime: on the first import your
+    3,821 songs got real dates (2024-05 → 2026-09) instead of all "today".
+  - Stats survive tag re-reads (changed size/mtime) and restarts.
+  - Columns: #, Rating, Plays, Date Added, Last Played added; header right-click
+    toggles columns. Header state key bumped to window/trackHeader2.
+
+FIXES
+  - Rating cells drew the number under the stars → background drawn via
+    CE_ItemViewItem with the text stripped.
+  - Snapshot hook now fires after the scan, not on the first (possibly empty) frame;
+    CYANBEAT_SNAPSHOT_SOURCE=playlist:<id>|smart:<n> for headless checks.
+
+VERIFIED
+  - tests/collection_test (17 checks, throwaway folder of empty .mp3s): playlist
+    order, missing-file slot kept across reorder and return, remove by visible
+    position, rename, delete cascade, play count/rating/last played across restart
+    and across a tag re-read.
+  - engine_smoke still passes.
+  - Offscreen renders: playlist view (# column, scoped browser, summary), Top 25
+    with ratings.
+  - NOT verified by me: mouse drag-and-drop, inline rename, context menus, rating
+    clicks (need a real session).
+
+NEXT
+  - Phase 2: MPRIS (org.mpris.MediaPlayer2.cyanbeat) + cyanbeat-remote with cmus-
+    remote flags; waybar dispatcher script (CyanBeat if running, else cmus).

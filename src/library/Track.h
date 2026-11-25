@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QString>
+#include <QtGlobal>
 #include <QVector>
 
 struct Track {
@@ -17,6 +18,12 @@ struct Track {
     qint64 durationMs = 0;
     qint64 sizeBytes = 0;
     qint64 mtime = 0;     // seconds since epoch; used by sync and incremental rescans
+
+    // Collection stats (SQLite), kept across tag re-reads.
+    int playCount = 0;
+    qint64 lastPlayed = 0; // seconds since epoch, 0 = never
+    int rating = 0;        // 0..5 stars
+    qint64 addedAt = 0;    // seconds since epoch
 
     // What the browser panes group by.
     QString browseArtist() const { return albumArtist.isEmpty() ? artist : albumArtist; }
