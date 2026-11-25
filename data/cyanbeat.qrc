@@ -1,0 +1,25 @@
+<!DOCTYPE RCC><RCC version="1.0"><qresource prefix="/">
+  <file alias="icons/add.svg">icons/add.svg</file>
+  <file alias="icons/close.svg">icons/close.svg</file>
+  <file alias="icons/cyanbeat.svg">icons/cyanbeat.svg</file>
+  <file alias="icons/music.svg">icons/music.svg</file>
+  <file alias="icons/next.svg">icons/next.svg</file>
+  <file alias="icons/pause.svg">icons/pause.svg</file>
+  <file alias="icons/phone.svg">icons/phone.svg</file>
+  <file alias="icons/play.svg">icons/play.svg</file>
+  <file alias="icons/playlist.svg">icons/playlist.svg</file>
+  <file alias="icons/prev.svg">icons/prev.svg</file>
+  <file alias="icons/repeat.svg">icons/repeat.svg</file>
+  <file alias="icons/repeat_one.svg">icons/repeat_one.svg</file>
+  <file alias="icons/search.svg">icons/search.svg</file>
+  <file alias="icons/shuffle.svg">icons/shuffle.svg</file>
+  <file alias="icons/speaker.svg">icons/speaker.svg</file>
+  <file alias="icons/stop.svg">icons/stop.svg</file>
+  <file alias="icons/vol_high.svg">icons/vol_high.svg</file>
+  <file alias="icons/vol_low.svg">icons/vol_low.svg</file>
+  <file alias="fonts/konso_bold.ttf">fonts/konso_bold.ttf</file>
+  <file alias="fonts/konso_bolditalic.ttf">fonts/konso_bolditalic.ttf</file>
+  <file alias="fonts/konso_italic.ttf">fonts/konso_italic.ttf</file>
+  <file alias="fonts/konso_regular.ttf">fonts/konso_regular.ttf</file>
+  <file alias="style/johnnycyan.qss">style/johnnycyan.qss</file>
+</qresource></RCC>

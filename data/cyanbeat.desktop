@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=CyanBeat
+GenericName=Music Player
+Comment=Play your local music library and sync it with your phone
+Exec=cyanbeat
+Icon=com.johnnygentoo.CyanBeat
+Terminal=false
+Categories=AudioVideo;Audio;Player;Qt;
+StartupWMClass=cyanbeat

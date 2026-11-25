@@ -1,0 +1,60 @@
+================================================================================
+CyanBeat Linux — Dev Log #1
+JohnnyGentoo Studios
+Date: 2026-11-25
+Phase: 0 — repo, Qt6 skeleton, JohnnyCyan theme, GStreamer playback, library +
+       column browser
+Branch: main
+Author: Claude
+================================================================================
+
+DECISIONS (user, 2026-11-25)
+  - C++ + Qt 6 Widgets (keeps a Windows port possible). Not GTK.
+  - Strawberry / 2007-era jukebox layout, but lighter-weight. JohnnyCyan palette.
+  - Konso bundled in the public repo.
+  - Phone sync = merge both ways ("keep olds, combine news"); deletions only in an
+    explicit mirror mode with confirmation. Both devices get new files from yt-dlp,
+    so they diverge.
+  - Public repo johnnygentoo/cyanbeat-linux, GPL-3.0-or-later.
+
+STACK
+  - Qt 6.12 Widgets on Fusion + data/style/johnnycyan.qss (adapted from
+    ~/.config/qt5ct/qss/johnny_cyan.qss). QT_NO_KEYWORDS (GLib uses `signals`).
+  - GStreamer 1.26 playbin3 (flags = audio | soft-volume, so no video windows from
+    webm/mp4). Bus messages go through a sync handler → queued onto the Qt thread,
+    so no GLib main loop is needed (Windows-friendly).
+  - TagLib 2.3 for tags + duration (its stderr chatter is silenced).
+  - Icons = the Android app's own vector paths, as SVG.
+
+LAYOUT
+  - Top bar: prev / play / next, volume, status display (title, artist — album,
+    elapsed, scrub bar with diamond playhead, remaining/total toggle), search.
+  - Left source list: LIBRARY › Music, DEVICES, PLAYLISTS (placeholders).
+  - Genre | Artist | Album browser (each narrows the next; "All (N …)" on top).
+  - Track table (Name, Time, Artist, Album, Genre, Year), sortable, movable columns.
+  - Bottom strip: add folder, shuffle, repeat, "3,821 songs, 25.0 days, 33.0 GB".
+
+FINDINGS
+  - KEY_UNIT seeks landed ~3 s early in yt-dlp webm/opus (cluster spacing). Seeks are
+    now FLUSH | ACCURATE; audio decode is cheap.
+  - ~/Music (34 GB, 3,821 files) is on /dev/sda2; a cold TagLib pass took ~74 s
+    while using < 1 s of CPU, so it's disk-bound. Added a binary library cache
+    (~/.cache/JohnnyGentoo Studios/CyanBeat/library.bin): launch shows it at once,
+    the rescan reuses entries whose size + mtime match, and an unchanged rescan
+    doesn't reset the view.
+  - Resources (.qrc) in the static core lib were dropped by the linker → moved onto
+    the executable.
+
+VERIFIED
+  - tests/engine_smoke (fakesink): play, position advances, pause holds, accurate
+    seek, EOS, bad-file error → Stopped. Passes on mp3, webm/opus, m4a, wma from
+    ~/Music.
+  - Offscreen screenshots (--snapshot, CYANBEAT_SNAPSHOT_PLAY=1): idle and playing.
+  - NOT verified: real audio output on the desktop, mouse scrubbing, key shortcuts
+    (needs the user at the machine).
+
+NEXT
+  - Phase 1: SQLite collection (playlists, play counts, ratings).
+  - Phase 2: MPRIS + cyanbeat-remote; waybar dispatcher (cyanbeat if running, else
+    cmus). waybar-cava.sh does `pkill -f "cava -p"`, so the in-app cava must not
+    use -p.
