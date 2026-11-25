@@ -1,0 +1,74 @@
+================================================================================
+CyanBeat Linux — Dev Log #7
+JohnnyGentoo Studios
+Date: 2026-11-25
+Phase: 5 — gapless, ReplayGain, vaporwave/FX + reskin, tray, MTP; QA fixes
+Branch: main
+Author: Claude
+================================================================================
+
+USER QA (while their real dedup + sync ran — no adb/MTP against the phone from
+here, installs swapped atomically)
+  - "a sync clears the library / needs a relaunch": the DEVICES phone item became
+    the sidebar's current item and reached the track list as a kind-less source →
+    empty list. Fixed both ends + regression test (fails on the old code). DB was
+    intact (3,783 tracks, 3,783 in sync state).
+  - "waybar controls don't interact": waybar (up since 00:16) never reloaded the
+    02:11 config, so buttons still ran plain cmus-remote. SIGUSR2 reload; cava
+    module restarted fine. cyanbeat-remote/MPRIS were fine.
+  - User emerged gst-plugins-soundtouch (also pulled app-xemacs/emerge + sudo
+    rebuild — command typo, harmless).
+
+GAPLESS (GstEngine about-to-finish + Player preload)
+  - Player keeps the next song (repeat/shuffle aware) as the engine's next URI;
+    STREAM_START after about-to-finish → gaplessAdvanced → queue catches up.
+  - BISECT: the old `speed` element rewrites timestamps → next song looked late
+    and was dropped (3×2 s songs "played" in 2 s). Removed.
+  - SoundTouch `pitch` breaks the timeline across a gapless switch too (song 3
+    late, position past the end, no EOS) — even at pitch 1.0. So it's only in the
+    chain while pitch ≠ 1: setEffects rebuilds the filter bin (READY, swap, restore
+    EQ/RG/FX, resume + seek back at ASYNC_DONE), and gapless steps aside meanwhile.
+  - With a speed effect on, each switch re-seeks to restore the rate (brief hiccup;
+    INSTANT_RATE_CHANGE reported success but applied late — not used).
+  - Verified on generated tones: 3×2 s = 6.00 s, one EOS; at 0.8x ≈ 7.3 s.
+
+REPLAYGAIN
+  - Tags read at song start (TagLib): REPLAYGAIN_TRACK/ALBUM_GAIN, Opus R128 (+5 dB
+    to the −18 reference). `volume` stage first in the chain; limiter on when > 0.
+  - Controls › Volume Leveling: Off / By song / By album (saved). Verified −6.0 dB.
+  - Most yt-dlp rips carry no RG tags; analysis (stored in the DB, not the files —
+    files changing would make sync see conflicts) is a possible follow-up.
+
+EFFECTS / VAPORWAVE (engine/Vapor, ui/EffectsDialog, Theme)
+  - Speed = playback rate + scaletempo (pitch kept), pitch = SoundTouch, reverb =
+    freeverb (level/room from 0..1), bass = 70 Hz peaking band 0..+12 dB.
+  - Measured: speed 0.8/1.5 keep 440 Hz at 0.8x/1.5x song time; tape 0.8 = 352 Hz at
+    0.8x; pitch 1.25 alone = 550 Hz at 1x; pitch on/off mid-song resumes in place.
+  - Window › Effects & Vaporwave (Ctrl+Shift+V), top-bar ≈ toggle, tray toggle.
+    Classic = 0.8/0.8/85 %/+6 dB. Switch not persisted (Android parity), knobs are.
+  - Reskin: Theme::accent()/accent2() swap poles (cyan↔magenta, violet→cyan);
+    SVG icons recoloured; stylesheet regenerated; visualizer goes magenta→cyan.
+  - Duration under a speed effect now from the song's tag (GStreamer reported the
+    stretched 6:05 for a 4:53 song).
+  - CRASH found by an ASan build (no gdb/lldb here): reskin re-set sidebar icons →
+    itemChanged → bogus playlist rename → list rebuilt under the iterator. Guarded;
+    regression test proven to fail without the guard.
+
+TRAY
+  - QSystemTrayIcon (waybar's tray via SNI): now-playing, play/pause/next/prev,
+    vaporwave, show/hide, quit; click = show/hide, middle = play/pause. Closing the
+    window keeps playing in the tray (Window menu toggle, first-time notice).
+    File › Quit, tray Quit and MPRIS Quit really quit.
+
+MTP (sync/Transport, libmtp)
+  - Sync now goes through a Transport: AdbTransport (as before) or MtpTransport
+    (libmtp: path→id map from listing, folder create, send to .cbpart + rename,
+    get, delete, storage free space). /sdcard/… maps onto the primary storage.
+  - Devices lists MTP-only phones (serial via LIBMTP_Get_Serialnumber = same id as
+    ADB, so sync state carries over); probing is cached per USB location and
+    paused during Check/Sync (a second MTP session would break a transfer).
+  - ADB path re-verified on the emulator after the refactor (16/16).
+  - NOT tested on a device yet: needs the real phone in File transfer mode.
+
+CYANBEAT_NO_ADB=1 keeps snapshot/test runs off connected phones (an earlier
+snapshot run had polled the real phone read-only: adb devices/getprop).

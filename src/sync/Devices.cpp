@@ -2,6 +2,7 @@
 #include "sync/Devices.h"
 
 #include "sync/Adb.h"
+#include "sync/Mtp.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -43,6 +44,7 @@ Devices::Devices(QObject *parent) : QObject(parent), m_poll(new QTimer(this))
 {
     // CYANBEAT_NO_ADB=1 keeps test/snapshot runs off any connected phone.
     m_adb = Adb::available() && !qEnvironmentVariableIsSet("CYANBEAT_NO_ADB");
+    m_mtp = Mtp::available() && !qEnvironmentVariableIsSet("CYANBEAT_NO_ADB");
     m_phones = loadKnown();
     connect(&m_watcher, &QFutureWatcher<Snapshot>::finished, this, [this] {
         const Snapshot s = m_watcher.result();
@@ -53,10 +55,10 @@ Devices::Devices(QObject *parent) : QObject(parent), m_poll(new QTimer(this))
     });
     m_poll->setInterval(10000);  // `adb devices` is cheap; notice plug/unplug within a few seconds
     connect(m_poll, &QTimer::timeout, this, [this] {
-        if (!busy())
+        if (!busy() && !m_paused)
             refresh();
     });
-    if (m_adb) {
+    if (m_adb || m_mtp) {
         m_poll->start();
         refresh();
     }
@@ -72,7 +74,7 @@ const Devices::Phone *Devices::phone(const QString &id) const
 
 void Devices::startJob(std::function<Snapshot()> job)
 {
-    if (!m_adb || m_watcher.isRunning())
+    if ((!m_adb && !m_mtp) || m_watcher.isRunning())
         return;
     m_watcher.setFuture(QtConcurrent::run(std::move(job)));
 }
@@ -80,7 +82,8 @@ void Devices::startJob(std::function<Snapshot()> job)
 QVector<Devices::Phone> Devices::scan()
 {
     QVector<Phone> out;
-    for (const Adb::Device &d : Adb::devices()) {
+    const QVector<Adb::Device> adbDevices = m_adb ? Adb::devices() : QVector<Adb::Device>();
+    for (const Adb::Device &d : adbDevices) {
         Phone p;
         p.transport = d.serial;
         p.wireless = d.wireless;
@@ -109,6 +112,26 @@ QVector<Devices::Phone> Devices::scan()
             }
         if (!dup)
             out << p;
+    }
+    // MTP: phones in plain "File transfer" mode. Only phones adb doesn't already
+    // see are added; each new USB location is opened once to read its serial.
+    if (m_mtp && !m_paused) {
+        QHash<QString, QPair<QString, QString>> seen;
+        for (const Mtp::Device &d : Mtp::devicesCached(m_mtpCache)) {
+            seen.insert(d.location, {d.serial, d.model});
+            bool viaAdb = false;
+            for (const Phone &p : std::as_const(out))
+                viaAdb = viaAdb || (!d.serial.isEmpty() && p.id == d.serial);
+            if (viaAdb)
+                continue;
+            Phone p;
+            p.id = d.serial.isEmpty() ? QStringLiteral("mtp:") + d.location : d.serial;
+            p.model = d.model;
+            p.transport = QStringLiteral("mtp:") + d.location;
+            p.mtp = true;
+            out << p;
+        }
+        m_mtpCache = seen;
     }
     return out;
 }

@@ -23,6 +23,7 @@ if(CYANBEAT_MPRIS)
   find_package(Qt6 REQUIRED COMPONENTS DBus)
 endif()
 find_package(PkgConfig REQUIRED)
+pkg_check_modules(MTP IMPORTED_TARGET libmtp)  # optional: phone sync without developer mode
 pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0 gstreamer-audio-1.0 gstreamer-pbutils-1.0)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 
@@ -45,6 +46,7 @@ add_library(cyanbeat_core STATIC
   src/sync/SyncPlan.cpp
   src/sync/Devices.cpp
   src/sync/SyncSession.cpp
+  src/sync/Transport.cpp
   src/ui/LcdDisplay.cpp
   src/ui/BrowserPanes.cpp
   src/ui/DuplicatesDialog.cpp
@@ -57,6 +59,10 @@ add_library(cyanbeat_core STATIC
   src/ui/MainWindow.cpp
 )
 target_include_directories(cyanbeat_core PUBLIC src)
+if(MTP_FOUND)
+  target_link_libraries(cyanbeat_core PUBLIC PkgConfig::MTP)
+  target_compile_definitions(cyanbeat_core PUBLIC CYANBEAT_HAVE_MTP)
+endif()
 if(CYANBEAT_MPRIS)
   target_sources(cyanbeat_core PRIVATE src/platform/Mpris.cpp)
   target_link_libraries(cyanbeat_core PUBLIC Qt6::DBus)

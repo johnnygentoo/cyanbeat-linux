@@ -3,6 +3,7 @@
 
 #include <QFutureWatcher>
 #include <QObject>
+#include <QHash>
 #include <QVector>
 #include <functional>
 
@@ -21,6 +22,7 @@ public:
         bool unauthorized = false;  // "allow USB debugging?" not answered yet
         QString lastIp;     // wlan0 address last seen
         bool tcpip = false; // `adb tcpip 5555` was set up from here
+        bool mtp = false;   // reachable only over MTP ("File transfer", no developer mode)
     };
 
     explicit Devices(QObject *parent = nullptr);
@@ -39,6 +41,8 @@ public:
     // longer-lived alternative and is picked up automatically.)
     void enableWireless(const QString &id);
     void forget(const QString &id);
+    // While a sync runs, don't open MTP sessions (a second one breaks the transfer).
+    void setPaused(bool paused) { m_paused = paused; }
 
 Q_SIGNALS:
     void changed();
@@ -54,6 +58,9 @@ private:
     void remember(const QVector<Phone> &connected);
 
     bool m_adb = false;
+    bool m_mtp = false;
+    bool m_paused = false;
+    QHash<QString, QPair<QString, QString>> m_mtpCache;  // location → (serial, model), worker-owned
     QVector<Phone> m_phones;
     QFutureWatcher<Snapshot> m_watcher;
     QTimer *m_poll;

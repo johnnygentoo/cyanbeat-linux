@@ -398,7 +398,7 @@ QWidget *MainWindow::buildSourceList()
                 continue;
             QString label = p.model.isEmpty() ? p.id : p.model;
             if (!p.transport.isEmpty())
-                label += p.wireless ? tr(" · Wi-Fi") : tr(" · USB");
+                label += p.mtp ? tr(" · USB (MTP)") : p.wireless ? tr(" · Wi-Fi") : tr(" · USB");
             list.push_back({p.id, label, !p.transport.isEmpty()});
         }
         m_sources->setPhones(list);

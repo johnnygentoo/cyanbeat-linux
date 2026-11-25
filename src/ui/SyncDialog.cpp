@@ -226,7 +226,7 @@ void SyncDialog::refreshPhones()
         else if (p.transport.isEmpty())
             label += tr(" — not connected");
         else
-            label += p.wireless ? tr(" — Wi-Fi") : tr(" — USB");
+            label += p.mtp ? tr(" — USB (File transfer)") : p.wireless ? tr(" — Wi-Fi") : tr(" — USB");
         m_phone->addItem(label, p.id);
     }
     int idx = m_phone->findData(keep);
@@ -272,10 +272,11 @@ void SyncDialog::updateButtons()
     const bool busy = m_session->busy();
     m_phoneState->setText(!p ? tr("No phone found — plug one in with USB debugging on.")
                           : p->unauthorized ? tr("Waiting for you to allow USB debugging on the phone.")
-                          : connected ? (p->wireless ? tr("Connected over Wi-Fi") : tr("Connected by USB"))
+                          : connected ? (p->mtp ? tr("Connected by USB (MTP — no developer mode needed)")
+                                         : p->wireless ? tr("Connected over Wi-Fi") : tr("Connected by USB"))
                                       : tr("Not connected"));
     m_wifi->setVisible(p && !connected && !p->unauthorized);
-    m_setupWifi->setVisible(p && connected && !p->wireless);
+    m_setupWifi->setVisible(p && connected && !p->wireless && !p->mtp);
     m_check->setEnabled(connected && !busy);
     bool anything = false;
     for (const auto &fp : m_plan.folders)
@@ -292,11 +293,13 @@ void SyncDialog::check()
     m_planPhone = currentPhoneId();
     m_check->setEnabled(false);
     m_sync->setEnabled(false);
+    m_devices->setPaused(true);
     m_session->scan(currentTransport(), m_planPhone, m_mirror->isChecked() ? SyncPlan::Mode::Mirror : SyncPlan::Mode::Merge);
 }
 
 void SyncDialog::showPlan(const SyncSession::Plan &plan)
 {
+    m_devices->setPaused(false);
     m_plan = plan;
     m_filling = true;
     m_tree->clear();
@@ -435,11 +438,13 @@ void SyncDialog::startSync()
     m_cancel->show();
     m_progress->show();
     m_tree->setEnabled(false);
+    m_devices->setPaused(true);
     m_session->run(currentTransport(), m_planPhone, m_plan);
 }
 
 void SyncDialog::onFinished(const SyncSession::Report &r)
 {
+    m_devices->setPaused(false);
     m_progress->hide();
     m_cancel->hide();
     m_sync->show();

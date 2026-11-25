@@ -3,7 +3,7 @@
 
 #include "library/Library.h"
 #include "library/Scanner.h"
-#include "sync/Adb.h"
+#include "sync/Transport.h"
 
 #include <QDir>
 #include <QDirIterator>
@@ -130,6 +130,11 @@ void SyncSession::scan(const QString &transport, const QString &phoneId, SyncPla
             plan.error = tr("No folders are set to sync.");
             return plan;
         }
+        const auto phone = Transport::open(transport);
+        if (!phone || !phone->ok()) {
+            plan.error = phone ? phone->error() : tr("This connection type isn't available in this build.");
+            return plan;
+        }
         for (const Input &in : inputs) {
             FolderPlan fp;
             fp.folder = in.folder;
@@ -141,7 +146,7 @@ void SyncSession::scan(const QString &transport, const QString &phoneId, SyncPla
             fp.local = listLocal(in.folder.local);
             bool ok = false;
             const QString prefix = in.folder.remote + QLatin1Char('/');
-            for (const Adb::RemoteFile &r : Adb::listFiles(transport, in.folder.remote, &ok)) {
+            for (const Transport::File &r : phone->list(in.folder.remote, &ok)) {
                 if (!r.path.startsWith(prefix) || !Scanner::isAudioFile(r.path))
                     continue;
                 fp.remote.push_back({r.path.mid(prefix.size()), r.size});
@@ -152,7 +157,7 @@ void SyncSession::scan(const QString &transport, const QString &phoneId, SyncPla
             fp.items = SyncPlan::plan(fp.local, fp.remote, in.synced, in.removed, mode);
             plan.folders << fp;
         }
-        plan.freeOnPhone = Adb::freeBytes(transport, inputs.first().folder.remote.section(QLatin1Char('/'), 0, 2));
+        plan.freeOnPhone = phone->freeBytes(inputs.first().folder.remote.section(QLatin1Char('/'), 0, 2));
         return plan;
     }));
 }
@@ -185,6 +190,16 @@ void SyncSession::run(const QString &transport, const QString &phoneId, const Pl
 
     m_runWatch.setFuture(QtConcurrent::run([=]() -> Report {
         Report &rep = outcome->report;
+        const auto phone = Transport::open(transport);
+        if (!phone || !phone->ok()) {
+            rep.failed = 1;
+            rep.errors << (phone ? phone->error() : tr("This connection type isn't available in this build."));
+            return rep;
+        }
+        // MTP addresses files by id: a listing first teaches the transport where everything is.
+        if (transport.startsWith(QLatin1String("mtp:")))
+            for (const FolderPlan &fp : plan.folders)
+                phone->list(fp.folder.remote, nullptr);
         int done = 0;
         qint64 bytes = 0;
         auto tick = [&](const QString &name) {
@@ -216,9 +231,9 @@ void SyncSession::run(const QString &transport, const QString &phoneId, const Pl
                     // Copy under a temporary name, then rename: a cancelled or failed copy
                     // never leaves half a song where the phone's player would find it.
                     const QString part = remote + QStringLiteral(".cbpart");
-                    ok = Adb::push(transport, local, part, &err) && Adb::move(transport, part, remote, &err);
+                    ok = phone->push(local, part, &err) && phone->rename(part, remote, &err);
                     if (!ok)
-                        Adb::remove(transport, part);
+                        phone->remove(part, nullptr);
                     if (ok)
                         ++rep.pushed;
                     break;
@@ -226,7 +241,7 @@ void SyncSession::run(const QString &transport, const QString &phoneId, const Pl
                 case SyncPlan::Action::Pull: {
                     const QString part = local + QStringLiteral(".cbpart");
                     QDir().mkpath(QFileInfo(local).absolutePath());
-                    ok = Adb::pull(transport, remote, part, &err);
+                    ok = phone->pull(remote, part, &err);
                     if (ok && QFileInfo::exists(local)) {
                         err = QStringLiteral("a file with that name appeared here meanwhile");
                         ok = false;
@@ -239,7 +254,7 @@ void SyncSession::run(const QString &transport, const QString &phoneId, const Pl
                     break;
                 }
                 case SyncPlan::Action::DeleteRemote:
-                    ok = Adb::remove(transport, remote, &err);
+                    ok = phone->remove(remote, &err);
                     if (ok)
                         ++rep.deletedRemote;
                     break;
