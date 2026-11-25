@@ -11,6 +11,8 @@
 
 class BrowserPanes;
 class DuplicatesDialog;
+class Devices;
+class SyncDialog;
 class Equalizer;
 class EqualizerDialog;
 class QStackedWidget;
@@ -66,6 +68,7 @@ private:
     void maybeSnapshot();
     void showDuplicates();
     void showEqualizer();
+    void showSync(const QString &phoneId = QString());
     void setVisualizerShown(bool on);
 
     // Playback (the queue lives in Player).
@@ -101,6 +104,8 @@ private:
     QTimer *m_searchDebounce = nullptr;
     QPointer<DuplicatesDialog> m_dupes;
     QPointer<EqualizerDialog> m_eqDialog;
+    QPointer<SyncDialog> m_syncDialog;
+    Devices *m_devices = nullptr;
     Equalizer *m_eq = nullptr;
     Visualizer *m_vis = nullptr;
     QStackedWidget *m_stack = nullptr;

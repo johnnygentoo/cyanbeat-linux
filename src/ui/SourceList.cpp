@@ -13,6 +13,8 @@ constexpr int KindRole = Qt::UserRole + 1;
 constexpr int SmartRole = Qt::UserRole + 2;
 constexpr int IdRole = Qt::UserRole + 3;
 constexpr int HeaderKind = 99;
+constexpr int PhoneKind = 98;
+constexpr int PhoneIdRole = Qt::UserRole + 4;
 
 QIcon icon(const char *name)
 {
@@ -61,11 +63,8 @@ SourceList::SourceList(QWidget *parent) : QTreeWidget(parent)
     m_music->setIcon(0, icon("music"));
     m_music->setData(0, KindRole, Source::Library);
 
-    auto *devices = sectionHeader(this, tr("DEVICES"));
-    auto *none = new QTreeWidgetItem(devices, {tr("No phone connected")});
-    none->setIcon(0, icon("phone"));
-    none->setFlags(Qt::NoItemFlags);
-    none->setData(0, KindRole, HeaderKind);
+    m_devicesHeader = sectionHeader(this, tr("DEVICES"));
+    setPhones({});
 
     m_playlistsHeader = sectionHeader(this, tr("PLAYLISTS"));
     for (int s = 0; s < Source::SmartCount; ++s) {
@@ -83,6 +82,11 @@ SourceList::SourceList(QWidget *parent) : QTreeWidget(parent)
         if (m_rebuilding || !cur || cur->data(0, KindRole).toInt() == HeaderKind)
             return;
         Q_EMIT sourceChanged(sourceOf(cur));
+    });
+    // Phones aren't a view of the library: clicking one opens Sync.
+    connect(this, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) {
+        if (item && item->data(0, KindRole).toInt() == PhoneKind)
+            Q_EMIT phoneActivated(item->data(0, PhoneIdRole).toString());
     });
     connect(this, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item) {
         if (m_rebuilding || item->data(0, KindRole).toInt() != Source::Playlist)
@@ -147,6 +151,30 @@ void SourceList::setPlaylists(const QVector<Playlist> &playlists)
     m_rebuilding = false;
     if (!again)
         Q_EMIT sourceChanged(current());
+}
+
+void SourceList::setPhones(const QVector<PhoneEntry> &phones)
+{
+    m_rebuilding = true;
+    qDeleteAll(m_devicesHeader->takeChildren());
+    if (phones.isEmpty()) {
+        auto *none = new QTreeWidgetItem(m_devicesHeader, {tr("No phone connected")});
+        none->setIcon(0, icon("phone"));
+        none->setFlags(Qt::NoItemFlags);
+        none->setData(0, KindRole, HeaderKind);
+    }
+    for (const PhoneEntry &p : phones) {
+        auto *item = new QTreeWidgetItem(m_devicesHeader, {p.label});
+        item->setIcon(0, icon("phone"));
+        item->setData(0, KindRole, PhoneKind);
+        item->setData(0, PhoneIdRole, p.id);
+        item->setFlags(Qt::ItemIsEnabled);
+        item->setToolTip(0, p.connected ? tr("Click to sync") : tr("Not connected — click to reconnect or sync"));
+        if (!p.connected)
+            item->setForeground(0, QColor(21, 244, 238, 120));
+    }
+    m_devicesHeader->setExpanded(true);
+    m_rebuilding = false;
 }
 
 void SourceList::beginRename(qint64 playlistId)

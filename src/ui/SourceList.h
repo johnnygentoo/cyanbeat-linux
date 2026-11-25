@@ -23,6 +23,11 @@ public:
     explicit SourceList(QWidget *parent = nullptr);
 
     void setPlaylists(const QVector<Playlist> &playlists);
+    struct PhoneEntry {
+        QString id, label;
+        bool connected = false;
+    };
+    void setPhones(const QVector<PhoneEntry> &phones);
     Source current() const;
     void select(const Source &s);
     void beginRename(qint64 playlistId);
@@ -36,6 +41,7 @@ Q_SIGNALS:
     void newPlaylistRequested();
     void renameRequested(qint64 id, const QString &name);
     void deleteRequested(qint64 id);
+    void phoneActivated(const QString &id);
 
 protected:
     void dragEnterEvent(QDragEnterEvent *e) override;
@@ -49,6 +55,7 @@ private:
     static Source sourceOf(const QTreeWidgetItem *item);
     QTreeWidgetItem *m_music = nullptr;
     QTreeWidgetItem *m_playlistsHeader = nullptr;
+    QTreeWidgetItem *m_devicesHeader = nullptr;
     QList<QTreeWidgetItem *> m_playlistItems;
     bool m_rebuilding = false;
 };

@@ -10,7 +10,7 @@
 #include <QVariant>
 
 namespace {
-constexpr int kSchemaVersion = 2;
+constexpr int kSchemaVersion = 3;
 }
 
 Collection::~Collection()
@@ -101,6 +101,16 @@ bool Collection::migrate()
                   " removed_at INTEGER NOT NULL,"
                   " reason TEXT,"
                   " kept_path TEXT)"));
+    }
+    if (version < 3) {
+        // Phone sync: which files were on both sides after the last sync, per
+        // phone (hardware serial) and folder. Mirror mode reads deletions off this.
+        ok = ok && exec(QStringLiteral(
+                  "CREATE TABLE IF NOT EXISTS sync_state ("
+                  " device TEXT NOT NULL,"
+                  " local_root TEXT NOT NULL,"
+                  " rel TEXT NOT NULL,"
+                  " PRIMARY KEY (device, local_root, rel))"));
     }
     ok = ok && exec(QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion));
     if (ok)
@@ -354,4 +364,39 @@ void Collection::repointPlaylists(const QString &from, const QString &to)
         }
         setPlaylistItems(id, out);
     }
+}
+
+// ---------------------------------------------------------------- sync state
+
+QSet<QString> Collection::syncState(const QString &device, const QString &localRoot)
+{
+    QSet<QString> out;
+    QSqlQuery q(QSqlDatabase::database(m_conn));
+    q.prepare(QStringLiteral("SELECT rel FROM sync_state WHERE device=? AND local_root=?"));
+    q.addBindValue(device);
+    q.addBindValue(localRoot);
+    q.exec();
+    while (q.next())
+        out.insert(q.value(0).toString());
+    return out;
+}
+
+void Collection::setSyncState(const QString &device, const QString &localRoot, const QSet<QString> &rels)
+{
+    QSqlDatabase db = QSqlDatabase::database(m_conn);
+    db.transaction();
+    QSqlQuery del(db);
+    del.prepare(QStringLiteral("DELETE FROM sync_state WHERE device=? AND local_root=?"));
+    del.addBindValue(device);
+    del.addBindValue(localRoot);
+    del.exec();
+    QSqlQuery ins(db);
+    ins.prepare(QStringLiteral("INSERT INTO sync_state (device, local_root, rel) VALUES (?,?,?)"));
+    for (const QString &r : rels) {
+        ins.addBindValue(device);
+        ins.addBindValue(localRoot);
+        ins.addBindValue(r);
+        ins.exec();
+    }
+    db.commit();
 }

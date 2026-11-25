@@ -3,6 +3,7 @@
 
 #include "library/Track.h"
 
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -58,6 +59,10 @@ public:
     // ---- removed on purpose
     void addTombstone(const QString &path, qint64 sizeBytes, const QString &reason, const QString &keptPath);
     QVector<Tombstone> tombstones();
+
+    // ---- phone sync
+    QSet<QString> syncState(const QString &device, const QString &localRoot);
+    void setSyncState(const QString &device, const QString &localRoot, const QSet<QString> &rels);
 
 private:
     bool exec(const QString &sql);

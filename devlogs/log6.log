@@ -1,0 +1,69 @@
+================================================================================
+CyanBeat Linux — Dev Log #6
+JohnnyGentoo Studios
+Date: 2026-11-25
+Phase: 4 — phone sync over ADB (merge / mirror), + EQ colour tweak
+Branch: main
+Author: Claude
+================================================================================
+
+USER
+  - "ready" for sync. Mid-way: "the eq could be more cyan or violet but I like the
+    opacness" → curve fill/stroke now cyan (lows) → violet #A06BFF (highs) at the
+    same translucency; fader fill violet → cyan. Pushed separately.
+  - Earlier in the session the user ran Find Duplicates for real: 85 files to the
+    Trash at 02:43, 85 tombstones in the real collection.db. 63 of them are still
+    on the phone — the case sync must not undo.
+
+SURVEY (read-only)
+  - Phone SM-S936U, Android 17: /sdcard/Music flat (2,928) + CyanBeat/ (43, the
+    Android app's yt-dlp grabs) + Recordings/ + .thumbnails/. PC ~/Music the same
+    shape. Merge on real data: push 877 (5.5 GB), pull 47 (282 MB), offer 63
+    deletions (the tombstoned duplicates). 0 same-name/different-size. 19.4 GB free.
+  - toybox: `find … -exec stat -c '%s|%Y|%n' {} +` lists everything in one call.
+  - Android 11+ FUSE indexes files pushed/removed through /sdcard by itself (title,
+    duration, is_music checked on an Android 16 emulator) — no media-scan step.
+  - Shared storage refuses ? : " * < > | \ in names (Operation not permitted).
+
+DESIGN  (src/sync/)
+  - Adb: blocking wrapper (program lookup: settings, PATH, ~/Android/Sdk,
+    $ANDROID_HOME), devices -l, mdns services, connect, getprop, wlan0 address,
+    listFiles, df, push/pull (paths passed as argv, no shell), mv/rm via quoted shell.
+  - SyncPlan (pure, unit-tested): match by phone-side name (illegal chars → yt-dlp's
+    full-width forms), size compare. Merge: new both ways; deleted-on-one-side is put
+    back (keep olds); tombstoned-here → DeleteRemote. Mirror: uses the previous
+    in-sync set to carry deletions; first sync never deletes. Same name, different
+    size → Conflict, untouched, and excluded from the in-sync set (else a later mirror
+    could delete one of two different files — caught by the test).
+  - Collection schema v3: sync_state(device = ro.serialno, local_root, rel).
+  - SyncSession: scan (worker) → Plan; run (worker) checked items only. Push to
+    "<name>.cbpart" then mv; pull to "<name>.cbpart" then rename (refuses to
+    overwrite a file that appeared meanwhile). DeleteLocal = Trash + tombstone.
+    Sync state, tombstones and library rescan applied on the GUI thread before the
+    dialog hears "finished". Cancellable between files.
+  - Devices: polls `adb devices` every 10 s; identifies phones by ro.serialno so USB
+    and Wi-Fi are the same phone; remembers model, last wlan0 IP, tcpip flag.
+    Reconnect: mDNS _adb-tls-connect service whose name holds the serial (what
+    worked for this phone before), then lastIp:5555 if tcpip was set up. "Set Up
+    Wi-Fi Sync" (cabled): `adb tcpip 5555` + connect, until reboot.
+  - UI: Sync Phone dialog (phone + state + Wi-Fi buttons, folder pairs editable,
+    Merge/Mirror, Check → grouped checkable plan with sizes and reasons, free-space
+    guard (keeps 512 MB), Sync with progress/cancel, confirmation listing deletions).
+    Sidebar DEVICES lists phones (dim when remembered but offline); click → Sync.
+
+VERIFIED
+  - syncplan_test (17): all rules above.
+  - sync_emulator_test (16) on an Android 16 emulator (started headless for the
+    test, killed after; the user's own emulator had been closed): push incl. the
+    "What? Really: yes" name and a subfolder, pull, tombstoned file deleted on the
+    device and not pulled back, no .cbpart left, pulled file complete, second scan
+    empty, mirror proposes both deletions, merge undoes them. Throwaway remote folder
+    removed.
+  - Real phone: CHECK ONLY (read-only listing) against a copy of the real database:
+    877 / 5.5 GB, 47 / 281.7 MB, 63 deletions, 19.4 GB free — matches the manual
+    count. No file on the phone was written or deleted by me.
+
+NOT DONE / NEXT
+  - The real sync run is the user's call (it deletes 63 files on the phone).
+  - Wi-Fi paths untested against the real phone (it was on USB).
+  - MTP fallback, gapless, ReplayGain, tray icon.

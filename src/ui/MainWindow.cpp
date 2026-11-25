@@ -6,6 +6,8 @@
 #include "ui/BrowserPanes.h"
 #include "ui/DuplicatesDialog.h"
 #include "ui/EqualizerDialog.h"
+#include "ui/SyncDialog.h"
+#include "sync/Devices.h"
 #include "ui/VisualizerView.h"
 #include "engine/Equalizer.h"
 #include "engine/Visualizer.h"
@@ -36,6 +38,7 @@
 #include <QStandardPaths>
 #include <QTableView>
 #include <QTimer>
+#include <QPushButton>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -72,6 +75,7 @@ MainWindow::MainWindow(Library *library, Player *player, QWidget *parent)
 
     m_eq = new Equalizer(m_player->engine(), this);
     m_vis = new Visualizer(m_player, this);
+    m_devices = new Devices(this);
 
     m_model = new TrackModel(this);
     m_proxy = new QSortFilterProxyModel(this);
@@ -235,6 +239,7 @@ void MainWindow::buildMenus()
 
     QMenu *tools = menuBar()->addMenu(tr("&Tools"));
     tools->addAction(tr("Find &Duplicates…"), this, &MainWindow::showDuplicates);
+    tools->addAction(tr("&Sync Phone…"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S), this, [this] { showSync(); });
 
     QMenu *view = menuBar()->addMenu(tr("&View"));
     m_browserAction = view->addAction(tr("Show Column &Browser"));
@@ -334,6 +339,20 @@ QWidget *MainWindow::buildSourceList()
     connect(m_sources, &SourceList::dropOnPlaylist, m_library, &Library::appendToPlaylist);
     connect(m_sources, &SourceList::renameRequested, m_library, &Library::renamePlaylist);
     connect(m_sources, &SourceList::deleteRequested, this, &MainWindow::confirmDeletePlaylist);
+    connect(m_sources, &SourceList::phoneActivated, this, &MainWindow::showSync);
+    auto phonesToSidebar = [this] {
+        QVector<SourceList::PhoneEntry> list;
+        for (const Devices::Phone &p : m_devices->phones()) {
+            if (p.unauthorized)
+                continue;
+            QString label = p.model.isEmpty() ? p.id : p.model;
+            if (!p.transport.isEmpty())
+                label += p.wireless ? tr(" · Wi-Fi") : tr(" · USB");
+            list.push_back({p.id, label, !p.transport.isEmpty()});
+        }
+        m_sources->setPhones(list);
+    };
+    connect(m_devices, &Devices::changed, this, phonesToSidebar);
     return m_sources;
 }
 
@@ -772,6 +791,23 @@ void MainWindow::setVisualizerShown(bool on)
         m_visView->setFocus();
 }
 
+void MainWindow::showSync(const QString &phoneId)
+{
+    if (!m_syncDialog) {
+        m_syncDialog = new SyncDialog(m_library, m_devices, this);
+        m_syncDialog->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    if (!phoneId.isEmpty()) {
+        m_syncDialog->selectPhone(phoneId);
+        const Devices::Phone *p = m_devices->phone(phoneId);
+        if (p && p->transport.isEmpty())
+            m_devices->connectWireless(phoneId);  // remembered phone: try Wi-Fi straight away
+    }
+    m_syncDialog->show();
+    m_syncDialog->raise();
+    m_syncDialog->activateWindow();
+}
+
 void MainWindow::showDuplicates()
 {
     if (!m_dupes) {
@@ -800,6 +836,26 @@ void MainWindow::maybeSnapshot()
             else
                 want.id = src.section(QLatin1Char(':'), 1).toLongLong();
             m_sources->select(want);
+        }
+        if (qEnvironmentVariableIsSet("CYANBEAT_SNAPSHOT_SYNC")) {  // sync dialog: Check (read-only), then grab
+            const QString id = qEnvironmentVariable("CYANBEAT_SNAPSHOT_SYNC");
+            auto *poll = new QTimer(this);
+            connect(poll, &QTimer::timeout, this, [this, id, path, poll] {
+                if (!m_devices->phone(id) || m_devices->phone(id)->transport.isEmpty())
+                    return;
+                poll->deleteLater();
+                showSync(id);
+                m_syncDialog->resize(1100, 760);
+                for (QPushButton *b : m_syncDialog->findChildren<QPushButton *>())
+                    if (b->text() == tr("Check"))
+                        QTimer::singleShot(300, b, &QPushButton::click);
+                QTimer::singleShot(25000, this, [this, path] {
+                    m_syncDialog->grab().save(path);
+                    QApplication::quit();
+                });
+            });
+            poll->start(500);
+            return;
         }
         if (qEnvironmentVariableIsSet("CYANBEAT_SNAPSHOT_EQ")) {  // grab the equalizer window
             m_eq->applyPreset(QStringLiteral("rock"));

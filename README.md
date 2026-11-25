@@ -4,7 +4,7 @@ A local music player in the JohnnyCyan look: a library, a column browser and a
 now-playing display, in the spirit of mid-2000s desktop jukeboxes, kept light.
 Desktop sibling of the CyanBeat Android app, from JohnnyGentoo Studios.
 
-Planned: two-way phone sync over ADB (USB or wireless) or MTP.
+Syncs with your Android phone over ADB (USB or Wi-Fi).
 
 ## Status
 
@@ -29,6 +29,17 @@ Early (v0.1.0). Working now:
   what you hear), using the smoothing/eq/colours from `~/.config/cava/config`. It's
   started as plain `cava`, so a waybar script that does `pkill -f "cava -p"` won't
   touch it. Without cava there's a built-in analyzer.
+- Phone sync (Tools › Sync Phone, Ctrl+Shift+S, or click the phone under DEVICES),
+  over ADB by USB or Wi-Fi. Pick folder pairs (default `~/Music` ↔ `/sdcard/Music`).
+  **Merge** copies new songs both ways and deletes nothing — except songs you removed
+  here on purpose (e.g. duplicates), which are offered for deletion on the phone and
+  never copied back. **Mirror** also carries deletions across, based on what was in
+  step last time (never on a first sync). Check shows every copy and delete,
+  checkable, with sizes and free space; deletes ask again. Files copy under a
+  temporary name and are renamed when complete. Names Android can't store
+  (`? : " * < > | \`) go over as yt-dlp's full-width look-alikes.
+  Wi-Fi: Android's Wireless debugging is picked up automatically once paired; or
+  click "Set Up Wi-Fi Sync" while cabled (adb tcpip, until the phone restarts).
 - Find Duplicates (Tools menu): identical files, the same YouTube video saved twice
   (`[id]` and `-id` names), and the same song under different names (artist/title in
   any order, track numbers and "(Official Video)" ignored, lengths must match). The
@@ -52,8 +63,7 @@ Early (v0.1.0). Working now:
 2. ~~SQLite collection: playlists, play counts, ratings, smart lists~~
 3. ~~MPRIS + `cyanbeat-remote` (cmus-remote-compatible flags) for waybar~~
 4. ~~Visualizer (cava) and EQ with the Android app's presets~~
-5. Phone sync over ADB: flagged folders, merged both ways (new files on either side
-   are copied to the other; nothing is deleted except in mirror mode, which asks first)
+5. ~~Phone sync over ADB: folder pairs, merge both ways or mirror (asks first)~~
 6. MTP fallback, gapless, ReplayGain, tray icon
 
 ## Build
@@ -68,7 +78,11 @@ cmake --build build
 ./build/cyanbeat
 ```
 
-Tests: `CYANBEAT_TEST_FILE=/path/to/song.mp3 ctest --test-dir build`
+Tests: `CYANBEAT_TEST_FILE=/path/to/song.mp3 CYANBEAT_TEST_ADB_SERIAL=emulator-5554 ctest --test-dir build`
+(the sync test writes only to a throwaway folder on that device — use an emulator).
+
+Phone sync needs `adb` (Android platform-tools): on PATH, in `~/Android/Sdk`, or
+`$ANDROID_HOME`.
 
 Install: `cmake --install build --prefix ~/.local` (installs `cyanbeat` and
 `cyanbeat-remote`, the desktop entry and the icon).
@@ -97,6 +111,7 @@ cyanbeat-remote --or-cmus -u   # CyanBeat if it's running, else cmus
 | Ctrl+B | Show/hide the column browser |
 | Ctrl+T | Visualizer (Esc or double-click to go back) |
 | Ctrl+E | Equalizer |
+| Ctrl+Shift+S | Sync phone |
 | Ctrl+O | Add a folder |
 | Ctrl+N / Ctrl+Shift+N | New playlist / from selection |
 | Delete | Remove selected songs from the playlist |

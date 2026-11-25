@@ -55,6 +55,15 @@ public:
     // not be trashed (left untouched). Triggers a rescan.
     QStringList removeDuplicates(const QVector<QPair<QString, QString>> &removeKeep);
     QVector<Tombstone> tombstones() { return m_db.tombstones(); }
+    void addTombstone(const QString &path, qint64 size, const QString &reason)
+    {
+        m_db.addTombstone(path, size, reason, QString());
+    }
+    QSet<QString> syncState(const QString &device, const QString &root) { return m_db.syncState(device, root); }
+    void setSyncState(const QString &device, const QString &root, const QSet<QString> &rels)
+    {
+        m_db.setSyncState(device, root, rels);
+    }
 
 Q_SIGNALS:
     void scanStarted();

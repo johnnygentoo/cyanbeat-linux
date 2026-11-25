@@ -39,10 +39,15 @@ add_library(cyanbeat_core STATIC
   src/library/Library.cpp
   src/library/TrackModel.cpp
   src/ui/Theme.cpp
+  src/sync/Adb.cpp
+  src/sync/SyncPlan.cpp
+  src/sync/Devices.cpp
+  src/sync/SyncSession.cpp
   src/ui/LcdDisplay.cpp
   src/ui/BrowserPanes.cpp
   src/ui/DuplicatesDialog.cpp
   src/ui/EqualizerDialog.cpp
+  src/ui/SyncDialog.cpp
   src/ui/VisualizerView.cpp
   src/ui/RatingDelegate.cpp
   src/ui/SourceList.cpp
@@ -80,6 +85,14 @@ if(BUILD_TESTING)
   qt_add_executable(duplicates_test tests/duplicates_test.cpp)
   target_link_libraries(duplicates_test PRIVATE cyanbeat_core)
   add_test(NAME duplicates_test COMMAND duplicates_test)
+  qt_add_executable(syncplan_test tests/syncplan_test.cpp)
+  target_link_libraries(syncplan_test PRIVATE cyanbeat_core)
+  add_test(NAME syncplan_test COMMAND syncplan_test)
+  # Needs an adb device to scribble on (an emulator): CYANBEAT_TEST_ADB_SERIAL=emulator-5554
+  qt_add_executable(sync_emulator_test tests/sync_emulator_test.cpp)
+  target_link_libraries(sync_emulator_test PRIVATE cyanbeat_core)
+  add_test(NAME sync_emulator_test COMMAND sync_emulator_test)
+  set_tests_properties(sync_emulator_test PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 install(TARGETS cyanbeat RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
